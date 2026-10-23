@@ -212,16 +212,18 @@ def retrieve(question: str, top_k: int | None = None, matrix: np.ndarray | None 
     build_index() explicitement puis passez (matrix, metas) à retrieve().
     """
     top_k = top_k or config.TOP_K
-    rows = fluree.all_chunks(source=source, entity=entity)
-    if not rows:
-        return []
-    query_embedding = ollama.embed_one(question)
+    # Vérifier d'abord si le cache existe pour la clé (source, entity)
+    cached = _index_cache.get((source, entity)) if (source, entity) in _index_cache else None
+    if cached is not None:
+        matrix, metas = cached
+        rows = []  # Pas besoin de recharger les rows
+    else:
+        rows = fluree.all_chunks(source=source, entity=entity)
+        if not rows:
+            return []
+        matrix, metas = build_index(rows, source=source, entity=entity)
 
-    # Utiliser le cache d'index si disponible et à jour
-    if matrix is None or matrix.shape[0] == 0:
-        cached = build_index(rows, source=source, entity=entity)
-        if cached is not None:
-            matrix, metas = cached
+    query_embedding = ollama.embed_one(question)
 
     if matrix is not None and matrix.shape[0] > 0 and metas is not None:
         hits = score_rows(

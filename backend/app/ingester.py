@@ -117,13 +117,14 @@ def ingest_text(text: str, source: str) -> list[dict]:
     if not chunks:
         return []
     fluree.ensure_ledger()
-    # Marquer les anciens chunks de cette source comme obsolètes
-    fluree.mark_obsolete(source)
     embeddings = ollama.embed_batch([c["content"] for c in chunks])
     for chunk, embedding in zip(chunks, embeddings):
         chunk["embedding"] = embedding
     for start in range(0, len(chunks), 100):
         fluree.insert_chunks(chunks[start : start + 100])
+    # Marquer les anciens chunks de cette source comme obsolètes
+    # (après insertion réussie pour éviter la perte de données)
+    fluree.mark_obsolete(source)
     # Invalide l'index de recherche sémantique (les chunks ont changé)
     from . import retriever as _retriever
 

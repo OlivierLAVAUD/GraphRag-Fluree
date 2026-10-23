@@ -88,14 +88,20 @@ def insert_chunks(chunks: list[dict]) -> dict:
 
 
 def mark_obsolete(source: str) -> dict:
-    """Marque tous les chunks existants d'une source comme obsolètes."""
-    payload = {
-        "@context": config.CTX,
-        "@graph": [
-            {"@id": "?c", "rag:obsolete": True}
-        ],
-        "where": {"@id": "?c", "@type": "rag:Chunk", "rag:source": source},
-    }
+    """Marque tous les chunks existants d'une source comme obsolètes.
+
+    Récupère d'abord les IDs des chunks de la source, puis les met à jour
+    un par un (ou par lot) avec rag:obsolete = true.
+    """
+    chunks = all_chunks(source=source)
+    updates = [
+        {"@id": chunk["@id"], "rag:obsolete": True}
+        for chunk in chunks
+        if chunk.get("@id")
+    ]
+    if not updates:
+        return {}
+    payload = {"@context": config.CTX, "@graph": updates}
     ledger_qs = quote(config.LEDGER, safe="")
     try:
         return _post(f"/upsert?ledger={ledger_qs}", payload, timeout=60)
