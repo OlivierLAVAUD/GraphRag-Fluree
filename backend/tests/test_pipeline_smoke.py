@@ -69,7 +69,21 @@ class FakeFluree:
             )
         return {"ok": True}
 
+    def mark_obsolete(self, source: str) -> dict:
+        for r in self.rows:
+            if r.get("rag:source") == source:
+                r["rag:obsolete"] = True
+        return {"ok": True}
+
     def all_chunks(self, source: str | None = None, entity: str | None = None) -> list[dict]:
+        rows = [r for r in self.rows if not r.get("rag:obsolete", False)]
+        if source:
+            rows = [r for r in rows if r.get("rag:source") == source]
+        if entity:
+            rows = [r for r in rows if r.get("rag:mentions") and any(
+                m.get("ent:name") == entity for m in r.get("rag:mentions", [])
+            )]
+        return rows
         rows = list(self.rows)
         if source:
             rows = [r for r in rows if r.get("rag:source") == source]
@@ -86,6 +100,7 @@ def fake_stack(monkeypatch):
     monkeypatch.setattr(fluree, "ensure_ledger", store.ensure_ledger)
     monkeypatch.setattr(fluree, "insert_chunks", store.insert_chunks)
     monkeypatch.setattr(fluree, "all_chunks", store.all_chunks)
+    monkeypatch.setattr(fluree, "mark_obsolete", store.mark_obsolete)
     monkeypatch.setattr(ollama, "embed_batch", _fake_embed_batch)
     monkeypatch.setattr(ollama, "embed_one", lambda t: _fake_embed(t))
     # Les embeddings simulés ont une échelle de similarité inférieure aux vrais

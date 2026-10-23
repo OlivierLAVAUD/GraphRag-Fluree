@@ -70,7 +70,7 @@ def insert_chunks(chunks: list[dict]) -> dict:
         entities = c.get("entities", [])
         if entities:
             chunk_obj["rag:mentions"] = [
-                {"@id": f"ent:{e['name'].lower().replace(' ', '_')}"}
+                {"@id": f"ent:{e['name'].lower().replace(' ', '_')}", "ent:name": e["name"]}
                 for e in entities
             ]
             for e in entities:
@@ -87,7 +87,49 @@ def insert_chunks(chunks: list[dict]) -> dict:
     return _post(f"/upsert?ledger={ledger_qs}", payload, timeout=120)
 
 
+def mark_obsolete(source: str) -> dict:
+    """Marque tous les chunks existants d'une source comme obsolètes."""
+    payload = {
+        "@context": config.CTX,
+        "@graph": [
+            {"@id": "?c", "rag:obsolete": True}
+        ],
+        "where": {"@id": "?c", "@type": "rag:Chunk", "rag:source": source},
+    }
+    ledger_qs = quote(config.LEDGER, safe="")
+    try:
+        return _post(f"/upsert?ledger={ledger_qs}", payload, timeout=60)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Impossible de marquer obsolètes : %s", exc)
+        return {}
+
+
 def all_chunks(source: str | None = None, entity: str | None = None) -> list[dict]:
+    """Renvoie les chunks du graphe, optionnellement filtrés.
+
+    Filtres :
+    - source : nom du fichier source
+    - entity : nom d'une entité mentionnée par le chunk
+    """
+    where = {"@id": "?c", "@type": "rag:Chunk", "rag:obsolete": False}
+    if source:
+        where["rag:source"] = source
+    if entity:
+        where["rag:mentions"] = {"ent:name": entity}
+
+    payload = {
+        "@context": config.CTX,
+        "select": {"?c": ["*"]},
+        "where": where,
+    }
+    out = _post(f"/query/{config.LEDGER}", payload, timeout=120)
+    if isinstance(out, list):
+        return out
+    if isinstance(out, dict):
+        for key in ("results", "result", "bindings", "rows"):
+            if key in out:
+                return out[key]
+    raise RuntimeError(f"Réponse Fluree inattendue : {str(out)[:300]}")
     """Renvoie les chunks du graphe, optionnellement filtrés.
 
     Filtres :

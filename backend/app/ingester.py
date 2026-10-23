@@ -117,6 +117,8 @@ def ingest_text(text: str, source: str) -> list[dict]:
     if not chunks:
         return []
     fluree.ensure_ledger()
+    # Marquer les anciens chunks de cette source comme obsolètes
+    fluree.mark_obsolete(source)
     embeddings = ollama.embed_batch([c["content"] for c in chunks])
     for chunk, embedding in zip(chunks, embeddings):
         chunk["embedding"] = embedding

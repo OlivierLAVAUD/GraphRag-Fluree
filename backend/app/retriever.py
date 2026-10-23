@@ -10,6 +10,7 @@ stockés dans le graphe Fluree, avec un index local optimisé.
   quand on veut éviter de recalculer la matrice à chaque requête.
 """
 import heapq
+import threading
 import json
 import logging
 
@@ -157,29 +158,29 @@ def score_rows(
 # ---------------------------------------------------------------------------
 # Cache de l'index local (matrice d'embeddings + métadonnées)
 # ---------------------------------------------------------------------------
-_index_cache: dict | None = None
+# Clé : tuple (source, entity) pour différencier les index filtrés
+_index_cache: dict[tuple[str | None, str | None], tuple[np.ndarray, list[dict]]] = {}
+_index_lock = threading.Lock()
 
 
 def invalidate_index() -> None:
     """Marque l'index comme obsolète (appelé après une insertion de chunks)."""
     global _index_cache
-    _index_cache = None
+    with _index_lock:
+        _index_cache.clear()
 
 
-def build_index(rows: list[dict]) -> tuple[np.ndarray, list[dict]]:
+def build_index(rows: list[dict], source: str | None = None, entity: str | None = None) -> tuple[np.ndarray, list[dict]]:
     """Construit (ou réutilise depuis le cache) la matrice d'embeddings.
 
-    Résultat : (X, metas) — X est (n_chunks, dim), metas est la liste des
-    métadonnées (content, source, index) des chunks, dans le même ordre que
-    les lignes de X. Chaque colonne est normalisée pour que le produit
-    matriciel donne directement la similarité cosinus.
-
-    Si _index_cache est utilisé, le résultat est réutilisé sans reconstruire.
+    Le cache est indexé par (source, entity) pour éviter les collisions.
     """
     global _index_cache
-    if _index_cache is None:
-        _index_cache = _build_index(rows)
-    return _index_cache
+    key = (source, entity)
+    with _index_lock:
+        if key not in _index_cache:
+            _index_cache[key] = _build_index(rows)
+        return _index_cache[key]
 
 
 def _extract_entity_names(text: str) -> list[str]:
@@ -218,7 +219,7 @@ def retrieve(question: str, top_k: int | None = None, matrix: np.ndarray | None 
 
     # Utiliser le cache d'index si disponible et à jour
     if matrix is None or matrix.shape[0] == 0:
-        cached = build_index(rows)
+        cached = build_index(rows, source=source, entity=entity)
         if cached is not None:
             matrix, metas = cached
 
