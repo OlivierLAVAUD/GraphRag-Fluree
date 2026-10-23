@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+.pytest_cache/
+.DS_Store
+*.egg-info/
+eval_results.json
+.fluree-data/
+ollama-data/
+.ipynb_checkpoints/
+.coverage
+htmlcov/
+.tox/
+*.log
+__pycache__/

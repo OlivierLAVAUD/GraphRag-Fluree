@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Fluree RAG Chatbot</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <span class="logo">◈</span>
+      <div>
+        <h1>Fluree RAG Chatbot</h1>
+        <p class="subtitle">Graphe de connaissances <strong>Fluree</strong> · LLM local <strong>Ollama</strong> (GPU NVIDIA)</p>
+      </div>
+    </div>
+    <div id="header-status" class="status-line">Connexion aux services…</div>
+  </header>
+
+  <main>
+    <section class="chat-panel">
+      <div id="messages" class="messages">
+        <div class="message assistant">
+          <div class="bubble">
+            Bonjour 👋 Je réponds à partir de la base de connaissances stockée dans le graphe
+            Fluree. Posez-moi une question, ou ajoutez d'abord des documents à indexer
+            (onglet « Documents »).
+          </div>
+        </div>
+      </div>
+      <form id="chat-form" class="composer">
+        <input id="question" name="question" type="text" placeholder="Ex : Quel est l'architecture de l'application ?" autocomplete="off" required>
+        <button type="submit" id="send-btn">Envoyer</button>
+      </form>
+    </section>
+
+    <aside class="side-panel">
+      <nav class="tabs">
+        <button id="tab-docs" class="tab active">Documents</button>
+        <button id="tab-gpu" class="tab">GPU &amp; modèles</button>
+      </nav>
+
+      <section id="view-docs" class="view">
+        <h2>Ajouter des documents</h2>
+        <p class="hint">Formats supportés : <code>.md</code>, <code>.txt</code>, <code>.pdf</code>.
+          Les fichiers sont découpés en chunks, embeddés puis stockés dans Fluree.</p>
+        <form id="upload-form">
+          <input type="file" id="file-input" name="files" accept=".md,.markdown,.txt,.pdf" multiple>
+          <button type="submit" id="upload-btn">Indexer les fichiers</button>
+        </form>
+        <div id="ingest-result" class="result"></div>
+        <h2>Depuis le terminal</h2>
+        <p class="hint">Placez vos fichiers dans le dossier <code>docs/</code> puis :</p>
+        <pre>docker compose exec backend python ingest.py docs/</pre>
+      </section>
+
+      <section id="view-gpu" class="view hidden">
+        <h2>Accélération GPU</h2>
+        <div id="gpu-status" class="result">Chargement…</div>
+        <h2>Modèles Ollama</h2>
+        <div id="models-status" class="result">Chargement…</div>
+      </section>
+    </aside>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

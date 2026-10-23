@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      # Pas de services externes nécessaires pour les tests unitaires (mocks utilisés)
+    steps:
+      - name: Checkout du code
+        uses: actions/checkout@v4
+
+      - name: Installer Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Installer les dépendances
+        run: |
+          pip install -r backend/requirements.txt
+          pip install -r backend/requirements-dev.txt
+
+      - name: Exécuter les tests
+        run: |
+          cd backend
+          PYTHONPATH=. pytest tests/ -v
+
+      - name: Upload des résultats de test
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-results
+          path: backend/tests/__pycache__/
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout du code
+        uses: actions/checkout@v4
+
+      - name: Installer Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Installer les outils de linting
+        run: |
+          pip install flake8 black
+
+      - name: Vérifier le formatage (black)
+        run: |
+          cd backend
+          black --check app/ tests/ ingest.py eval_rag.py
+
+      - name: Vérifier le style (flake8)
+        run: |
+          cd backend
+          flake8 app/ tests/ ingest.py eval_rag.py

@@ -1,0 +1,97 @@
+name: graphrag-fluree
+
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: fluree-rag-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-models:/root/.ollama
+    environment:
+      OLLAMA_KEEP_ALIVE: "10m"
+    # Utilise le GPU NVIDIA (nécessite nvidia-container-toolkit, voir README)
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 15s
+    restart: unless-stopped
+
+  # Télécharge les modèles une fois au premier démarrage (volumes persistés).
+  # OLLAMA_HOST pointe vers le serveur `ollama` : le CLI envoie son
+  # téléchargement au serveur, qui écrit dans le volume partagé.
+  ollama-init:
+    image: ollama/ollama:latest
+    container_name: fluree-rag-ollama-init
+    depends_on:
+      ollama:
+        condition: service_healthy
+    volumes:
+      - ollama-models:/root/.ollama
+    environment:
+      OLLAMA_HOST: "http://ollama:11434"
+    entrypoint: ["/bin/sh", "-c", "ollama pull llama3.1:8b && ollama pull nomic-embed-text"]
+    restart: "no"
+
+  fluree:
+    image: fluree/server:latest
+    container_name: fluree-rag-fluree
+    ports:
+      - "8090:8090"
+    volumes:
+      - fluree-data:/var/lib/fluree
+    environment:
+      FLUREE_LISTEN_ADDR: "0.0.0.0:8090"
+      FLUREE_INDEXING_ENABLED: "true"
+      RUST_LOG: info
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8090/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+
+  backend:
+    build: ./backend
+    container_name: fluree-rag-backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./docs:/app/docs:ro
+      - ./tests:/app/tests:ro
+    environment:
+      OLLAMA_URL: http://ollama:11434
+      FLUREE_URL: http://fluree:8090
+      FLUREE_LEDGER: kb/main
+      EMBED_MODEL: nomic-embed-text
+      CHAT_MODEL: llama3.1:8b
+      TOP_K: "7"
+      RETRIEVAL_MIN_SCORE: "0.3"
+    depends_on:
+      fluree:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
+      ollama-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/status')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+volumes:
+  ollama-models:
+  fluree-data:
