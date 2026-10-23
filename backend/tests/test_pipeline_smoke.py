@@ -64,12 +64,20 @@ class FakeFluree:
                     "rag:embedding": c["embedding"],
                     "rag:source": c["source"],
                     "rag:chunkIndex": c["index"],
+                    "rag:obsolete": False,
                 }
             )
         return {"ok": True}
 
-    def all_chunks(self) -> list[dict]:
-        return list(self.rows)
+    def all_chunks(self, source: str | None = None, entity: str | None = None) -> list[dict]:
+        rows = list(self.rows)
+        if source:
+            rows = [r for r in rows if r.get("rag:source") == source]
+        if entity:
+            rows = [r for r in rows if r.get("rag:mentions") and any(
+                m.get("ent:name") == entity for m in r.get("rag:mentions", [])
+            )]
+        return rows
 
 
 @pytest.fixture
@@ -150,7 +158,7 @@ def test_search_endpoint_returns_hits(monkeypatch):
         }
     ]
 
-    def fake_retrieve(question, top_k=None, matrix=None):
+    def fake_retrieve(question, top_k=None, matrix=None, source=None, entity=None):
         return fake_hits
 
     monkeypatch.setattr("app.main.retriever.retrieve", fake_retrieve)

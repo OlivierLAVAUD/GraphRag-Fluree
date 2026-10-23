@@ -182,7 +182,18 @@ def build_index(rows: list[dict]) -> tuple[np.ndarray, list[dict]]:
     return _index_cache
 
 
-def retrieve(question: str, top_k: int | None = None, matrix: np.ndarray | None = None, metas: list[dict] | None = None) -> list[dict]:
+def _extract_entity_names(text: str) -> list[str]:
+    """Extrait les noms d'entités d'un texte (réutilise le module entities)."""
+    try:
+        from . import entities
+
+        ents = entities.extract_entities(text)
+        return [e["name"] for e in ents]
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def retrieve(question: str, top_k: int | None = None, matrix: np.ndarray | None = None, metas: list[dict] | None = None, source: str | None = None, entity: str | None = None) -> list[dict]:
     """Pipeline complet : embed de la question, récupération des chunks,
     filtrage par seuil puis top_k.
 
@@ -200,7 +211,7 @@ def retrieve(question: str, top_k: int | None = None, matrix: np.ndarray | None 
     build_index() explicitement puis passez (matrix, metas) à retrieve().
     """
     top_k = top_k or config.TOP_K
-    rows = fluree.all_chunks()
+    rows = fluree.all_chunks(source=source, entity=entity)
     if not rows:
         return []
     query_embedding = ollama.embed_one(question)
@@ -220,6 +231,22 @@ def retrieve(question: str, top_k: int | None = None, matrix: np.ndarray | None 
         hits = score_rows(
             query_embedding, rows, top_k, min_score=config.RETRIEVAL_MIN_SCORE
         )
+
+    # Hybrid bonus : si un chunk mentionne une entité présente dans la question,
+    # on ajoute un bonus basé sur les relations du graphe.
+    question_lower = question.lower()
+    for hit in hits:
+        bonus = 0.0
+        content = hit.get("content", "").lower()
+        for ent_name in _extract_entity_names(hit.get("content", "")):
+            if ent_name.lower() in question_lower:
+                bonus += 0.1
+        if bonus > 0:
+            hit["score"] = round(hit["score"] + bonus, 4)
+
+    # Re-trier après le bonus
+    hits.sort(key=lambda h: h["score"], reverse=True)
+    hits = hits[:top_k]
 
     log.info(
         "Retrieval : %d candidats, %d retenus (seuil %.2f)",

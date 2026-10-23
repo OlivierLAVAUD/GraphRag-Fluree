@@ -14,7 +14,9 @@ LEDGER = os.environ.get("FLUREE_LEDGER", "kb/main")
 # Préfixe RDF utilisé pour les prédicats du graphe de connaissances
 # (https://ns.flurag.dev/content, .../source, .../embedding, .../chunkIndex)
 RAG_NS = "https://ns.flurag.dev/"
-CTX = {"rag": RAG_NS}
+# Namespace pour les entités nommées (entreprises, personnes, etc.)
+ENT_NS = "https://ns.flurag.dev/ent/"
+CTX = {"rag": RAG_NS, "ent": ENT_NS}
 
 # -- Modèles Ollama ----------------------------------------------------------
 EMBED_MODEL = os.environ.get("EMBED_MODEL", "nomic-embed-text")

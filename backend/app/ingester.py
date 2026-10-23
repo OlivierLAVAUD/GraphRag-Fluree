@@ -7,7 +7,7 @@ import re
 from io import BytesIO
 from pathlib import Path
 
-from . import config, fluree, ollama_client as ollama
+from . import config, entities, fluree, ollama_client as ollama
 
 log = logging.getLogger(__name__)
 
@@ -95,12 +95,14 @@ def prepare_chunks(text: str, source: str) -> list[dict]:
     chunks = []
     for index, content in enumerate(chunk_text(text)):
         chunk_id = hashlib.sha1(f"{source}::{index}::{content}".encode()).hexdigest()[:16]
+        ents = entities.extract_entities(content)
         chunks.append(
             {
                 "chunk_id": chunk_id,
                 "index": index,
                 "source": source,
                 "content": content,
+                "entities": ents,
             }
         )
     return chunks

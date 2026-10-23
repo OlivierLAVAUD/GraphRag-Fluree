@@ -166,13 +166,27 @@ async def search(request: dict) -> dict:
         top_k = int(request.get("top_k", config.TOP_K))
     except (TypeError, ValueError):
         top_k = config.TOP_K
-    hits = await asyncio.to_thread(retriever.retrieve, question, top_k=top_k)
+    source = request.get("source")
+    entity = request.get("entity")
+    hits = await asyncio.to_thread(
+        retriever.retrieve, question, top_k=top_k, source=source, entity=entity
+    )
     return {
         "question": question,
         "top_k": top_k,
         "min_score": config.RETRIEVAL_MIN_SCORE,
         "results": hits,
     }
+
+
+@app.get("/api/history")
+async def history() -> dict:
+    """Consulte l'évolution des insertions dans Fluree."""
+    try:
+        entries = await asyncio.to_thread(fluree.history)
+        return {"history": entries}
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=503, detail=f"Historique indisponible : {exc}") from exc
 
 
 def _event(payload: dict) -> str:

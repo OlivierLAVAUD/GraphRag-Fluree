@@ -50,32 +50,60 @@ def insert_chunks(chunks: list[dict]) -> dict:
 
     /upsert est idempotent : ré-ingérer un chunk déjà présent (même @id et
     mêmes valeurs) n'ajoute pas de doublons — les chunks gardent un @id stable
-    dérivé de leur contenu."""
-    inserts = [
-        {
+    dérivé de leur contenu.
+
+    Si un chunk contient des entités (clé 'entities'), les entités et les liens
+    rag:mentions sont insérés dans la même transaction.
+    """
+    inserts = []
+    for c in chunks:
+        chunk_obj = {
             "@id": f"rag:{c['chunk_id']}",
             "@type": "rag:Chunk",
             "rag:content": c["content"],
-            # @list : préserve l'ORDRE du vecteur (un tableau JSON-LD brut est
-            # traité comme un ensemble et Fluree le trie au stockage, ce qui
-            # détruirait le sens positionnel de l'embedding).
             "rag:embedding": {"@list": c["embedding"]},
             "rag:source": c["source"],
             "rag:chunkIndex": c["index"],
+            "rag:obsolete": False,
         }
-        for c in chunks
-    ]
+        # Ajouter les mentions d'entités
+        entities = c.get("entities", [])
+        if entities:
+            chunk_obj["rag:mentions"] = [
+                {"@id": f"ent:{e['name'].lower().replace(' ', '_')}"}
+                for e in entities
+            ]
+            for e in entities:
+                ent_id = f"ent:{e['name'].lower().replace(' ', '_')}"
+                inserts.append({
+                    "@id": ent_id,
+                    "@type": f"ent:{e['type']}",
+                    "ent:name": e["name"],
+                })
+        inserts.append(chunk_obj)
+
     payload = {"@context": config.CTX, "@graph": inserts}
     ledger_qs = quote(config.LEDGER, safe="")
     return _post(f"/upsert?ledger={ledger_qs}", payload, timeout=120)
 
 
-def all_chunks() -> list[dict]:
-    """Renvoie tous les chunks du graphe (sujets de type rag:Chunk)."""
+def all_chunks(source: str | None = None, entity: str | None = None) -> list[dict]:
+    """Renvoie les chunks du graphe, optionnellement filtrés.
+
+    Filtres :
+    - source : nom du fichier source
+    - entity : nom d'une entité mentionnée par le chunk
+    """
+    where = {"@id": "?c", "@type": "rag:Chunk", "rag:obsolete": False}
+    if source:
+        where["rag:source"] = source
+    if entity:
+        where["rag:mentions"] = {"ent:name": entity}
+
     payload = {
         "@context": config.CTX,
         "select": {"?c": ["*"]},
-        "where": {"@id": "?c", "@type": "rag:Chunk"},
+        "where": where,
     }
     out = _post(f"/query/{config.LEDGER}", payload, timeout=120)
     if isinstance(out, list):
@@ -85,3 +113,19 @@ def all_chunks() -> list[dict]:
             if key in out:
                 return out[key]
     raise RuntimeError(f"Réponse Fluree inattendue : {str(out)[:300]}")
+
+
+def history() -> list[dict]:
+    """Renvoie l'historique des transactions du ledger (via /v1/fluree/history)."""
+    try:
+        out = _post(f"/history/{config.LEDGER}", {}, timeout=30)
+        if isinstance(out, list):
+            return out
+        if isinstance(out, dict):
+            for key in ("results", "result", "bindings", "rows", "history"):
+                if key in out:
+                    return out[key]
+        return []
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Historique Fluree indisponible : %s", exc)
+        return []
