@@ -120,11 +120,14 @@ def ingest_text(text: str, source: str) -> list[dict]:
     embeddings = ollama.embed_batch([c["content"] for c in chunks])
     for chunk, embedding in zip(chunks, embeddings):
         chunk["embedding"] = embedding
+    # Collecter les IDs des nouveaux chunks avant le marquage d'obsolescence
+    new_ids = {c["chunk_id"] for c in chunks}
     for start in range(0, len(chunks), 100):
         fluree.insert_chunks(chunks[start : start + 100])
     # Marquer les anciens chunks de cette source comme obsolètes
     # (après insertion réussie pour éviter la perte de données)
-    fluree.mark_obsolete(source)
+    # On conserve les IDs des nouveaux chunks pour ne pas les marquer obsolètes
+    fluree.mark_obsolete(source, keep_ids=new_ids)
     # Invalide l'index de recherche sémantique (les chunks ont changé)
     from . import retriever as _retriever
 

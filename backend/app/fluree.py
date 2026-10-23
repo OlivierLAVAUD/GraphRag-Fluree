@@ -87,17 +87,20 @@ def insert_chunks(chunks: list[dict]) -> dict:
     return _post(f"/upsert?ledger={ledger_qs}", payload, timeout=120)
 
 
-def mark_obsolete(source: str) -> dict:
-    """Marque tous les chunks existants d'une source comme obsolètes.
+def mark_obsolete(source: str, keep_ids: set | None = None) -> dict:
+    """Marque tous les chunks existants d'une source comme obsolètes, en excluant les IDs spécifiés.
 
-    Récupère d'abord les IDs des chunks de la source, puis les met à jour
-    un par un (ou par lot) avec rag:obsolete = true.
+    Args:
+        source: La source dont les chunks doivent être marqués obsolètes.
+        keep_ids: Ensemble d'IDs de chunks à conserver (ne pas marquer comme obsolètes).
+                  Utile pour exclure les nouveaux chunks récemment insérés.
     """
     chunks = all_chunks(source=source)
+    keep_ids = keep_ids or set()
     updates = [
         {"@id": chunk["@id"], "rag:obsolete": True}
         for chunk in chunks
-        if chunk.get("@id")
+        if chunk.get("@id") and chunk["@id"] not in keep_ids
     ]
     if not updates:
         return {}

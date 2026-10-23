@@ -69,9 +69,10 @@ class FakeFluree:
             )
         return {"ok": True}
 
-    def mark_obsolete(self, source: str) -> dict:
+    def mark_obsolete(self, source: str, keep_ids: set | None = None) -> dict:
+        keep_ids = keep_ids or set()
         for r in self.rows:
-            if r.get("rag:source") == source:
+            if r.get("rag:source") == source and r.get("@id") not in keep_ids:
                 r["rag:obsolete"] = True
         return {"ok": True}
 
