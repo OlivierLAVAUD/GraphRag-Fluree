@@ -109,7 +109,16 @@ def evaluate(question: str, expected: str, expected_absence: bool) -> dict:
     else:
         messages = prompts.build_messages(question, hits)
         parts: list[str] = []
-        ollama.chat_stream(messages, on_delta=parts.append)
+        try:
+            ollama.chat_stream(messages, on_delta=parts.append)
+        except Exception as exc:  # noqa: BLE001
+            return {
+                "answer": f"Dans l'évaluation, la génération a échoué : {exc}",
+                "score": 0.0,
+                "absence_detected": False,
+                "top_hits": [],
+                "error": str(exc),
+            }
         answer = "".join(parts)
 
     absence_detected = is_absence_answer(answer)

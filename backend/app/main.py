@@ -81,6 +81,11 @@ async def ingest(files: list[UploadFile] = File(...)) -> dict:
     results = []
     for upload in files:
         data = await upload.read()
+        if len(data) > config.MAX_UPLOAD_SIZE:
+            raise HTTPException(
+                status_code=413,
+                detail=f"Fichier trop volumineux ({len(data)} octets, limite {config.MAX_UPLOAD_SIZE}).",
+            )
         text = ingester.read_bytes(data, upload.filename or "fichier")
         chunks = await asyncio.to_thread(ingester.ingest_text, text, upload.filename or "fichier")
         results.append(
@@ -90,6 +95,7 @@ async def ingest(files: list[UploadFile] = File(...)) -> dict:
                 "chunks": len(chunks),
             }
         )
+    retriever.invalidate_index()
     return {"ingested": results}
 
 

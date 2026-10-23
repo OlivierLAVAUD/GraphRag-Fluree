@@ -11,13 +11,9 @@ services:
     environment:
       OLLAMA_KEEP_ALIVE: "10m"
     # Utilise le GPU NVIDIA (nécessite nvidia-container-toolkit, voir README)
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
+    # Docker Compose v2 : utilise gpus: all (compatible Compose v2)
+    # Docker Swarm legacy : décommentez la section deploy.resources ci-dessous
+    gpus: all
     healthcheck:
       test: ["CMD", "ollama", "list"]
       interval: 15s
@@ -54,7 +50,7 @@ services:
       FLUREE_INDEXING_ENABLED: "true"
       RUST_LOG: info
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8090/health"]
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8090/health"]
       interval: 10s
       timeout: 5s
       retries: 12

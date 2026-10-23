@@ -44,15 +44,26 @@ def gpu_status() -> dict:
     return {"models": models}
 
 
-def embed_batch(texts: list[str]) -> list[list[float]]:
-    """Embedd une liste de textes en un seul appel (modèle : nomic-embed-text)."""
-    resp = httpx.post(
-        f"{config.OLLAMA_URL}/api/embed",
-        json={"model": config.EMBED_MODEL, "input": texts},
-        timeout=300,
-    )
-    resp.raise_for_status()
-    return resp.json()["embeddings"]
+def embed_batch(texts: list[str], batch_size: int = 32) -> list[list[float]]:
+    """Embedd une liste de textes par lots (modèle : nomic-embed-text).
+
+    Envoie les textes par sous-lots de *batch_size* pour éviter les timeouts
+    et la saturation mémoire sur de gros documents. Les résultats sont
+    concaténés dans l'ordre d'entrée.
+    """
+    if not texts:
+        return []
+    results: list[list[float]] = []
+    for i in range(0, len(texts), batch_size):
+        batch = texts[i : i + batch_size]
+        resp = httpx.post(
+            f"{config.OLLAMA_URL}/api/embed",
+            json={"model": config.EMBED_MODEL, "input": batch},
+            timeout=300,
+        )
+        resp.raise_for_status()
+        results.extend(resp.json()["embeddings"])
+    return results
 
 
 def embed_one(text: str) -> list[float]:

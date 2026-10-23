@@ -29,5 +29,8 @@ RETRIEVAL_MIN_SCORE = float(os.environ.get("RETRIEVAL_MIN_SCORE", "0.3"))
 CHUNK_SIZE = int(os.environ.get("CHUNK_SIZE", "500"))
 CHUNK_OVERLAP = int(os.environ.get("CHUNK_OVERLAP", "80"))
 
+# -- Limites d'upload ---------------------------------------------------------
+MAX_UPLOAD_SIZE = int(os.environ.get("MAX_UPLOAD_SIZE", str(50 * 1024 * 1024)))  # 50 Mo par défaut
+
 # Extensions de fichiers acceptées à l'ingestion
 SUPPORTED_EXTENSIONS = {".md", ".markdown", ".txt", ".pdf"}
