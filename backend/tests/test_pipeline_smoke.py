@@ -5,6 +5,7 @@ contrôle thématique proche d'un vrai modèle). Vérifie que les questions
 topiques retrouvent bien les bons passages."""
 
 import hashlib
+import json
 import re
 from pathlib import Path
 
@@ -259,6 +260,41 @@ def test_chat_without_hits_asks_the_llm(monkeypatch):
     assert "Je ne dispose pas de cette information" in resp.text
     assert "aucun extrait pertinent" in captured["content"]
     assert "Ingérez d'abord des documents" not in resp.text
+
+
+def test_chat_sources_include_short_snippet(monkeypatch):
+    """Les sources SSE exposent un extrait court, jamais le chunk complet."""
+    from fastapi.testclient import TestClient
+    from app.main import app
+
+    content = "Le contenu pertinent. " + "x" * 300
+    monkeypatch.setattr(
+        "app.main.retriever.retrieve",
+        lambda *a, **k: [
+            {"content": content, "source": "doc.md", "index": 2, "score": 0.91}
+        ],
+    )
+    monkeypatch.setattr(
+        "app.main.ollama.chat_stream",
+        lambda messages, on_delta: on_delta("Réponse."),
+    )
+
+    client = TestClient(app, raise_server_exceptions=False)
+    resp = client.post("/api/chat", json={"question": "Une question ?"})
+
+    assert resp.status_code == 200
+    events = [
+        json.loads(line[6:])
+        for line in resp.text.splitlines()
+        if line.startswith("data: ")
+    ]
+    source = next(event for event in events if event["type"] == "sources")["sources"][0]
+    assert source["source"] == "doc.md"
+    assert source["index"] == 2
+    assert source["score"] == 0.91
+    assert source["snippet"].startswith("Le contenu pertinent.")
+    assert len(source["snippet"]) <= 241
+    assert "content" not in source
 
 
 def test_search_endpoint_returns_hits(monkeypatch):

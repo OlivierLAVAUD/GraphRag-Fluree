@@ -1,69 +1,294 @@
 <!DOCTYPE html>
-<html lang="fr">
+<html lang="fr" data-theme="light">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>GraphRag with Fluree</title>
+  <script>
+    try {
+      const theme = localStorage.getItem("graphrag-theme");
+      if (theme === "dark" || theme === "light") document.documentElement.dataset.theme = theme;
+    } catch (error) {}
+  </script>
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-  <header>
-    <div class="brand">
-      <span class="logo">◈</span>
-      <div>
-        <h1>GraphRag with Fluree</h1>
-        <p class="subtitle">Graphe de connaissances <strong>Fluree</strong> · LLM local <strong>Ollama</strong> (GPU NVIDIA)</p>
-      </div>
-    </div>
-    <div id="header-status" class="status-line">Connexion aux services…</div>
-  </header>
+  <svg class="svg-sprite" aria-hidden="true">
+    <symbol id="i-logo" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="4.6" r="2.1"/>
+      <circle cx="5" cy="18.8" r="2.1"/>
+      <circle cx="19" cy="18.8" r="2.1"/>
+      <path d="M10.9 6.5 6.1 16.8M13.1 6.5l4.8 10.3M7.1 18.8h9.8"/>
+    </symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.4-3.4"/></symbol>
+    <symbol id="i-chevron-down" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></symbol>
+    <symbol id="i-chevron-right" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></symbol>
+    <symbol id="i-menu" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M4 12h16M4 17h16"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h9M17 6h3M4 12h4M12 12h8M4 18h9M17 18h3"/><circle cx="15" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="15" cy="18" r="2"/></symbol>
+    <symbol id="i-database" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></symbol>
+    <symbol id="i-more" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></symbol>
+    <symbol id="i-paperclip" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21.4 11.6l-8.9 8.9a5 5 0 0 1-7.1-7.1l9.2-9.2a3.5 3.5 0 0 1 5 5l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5"/></symbol>
+    <symbol id="i-send" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.5-3 7.7-7 9-4-1.3-7-4.5-7-9V6l7-3Z"/><path d="m9 12 2 2 4-4"/></symbol>
+    <symbol id="i-doc" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5Z"/><path d="M14 3v5h5"/></symbol>
+    <symbol id="i-compare" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M8 4 4 8l4 4M4 8h11a3 3 0 0 1 3 3v1M16 20l4-4-4-4M20 16H9a3 3 0 0 1-3-3v-1"/></symbol>
+    <symbol id="i-check-search" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.4-3.4M8 11l2 2 4-4"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"/></symbol>
+    <symbol id="i-external" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6M20 4l-8 8M18 13v5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h5"/></symbol>
+    <symbol id="i-filter" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M7 12h10M10 18h4"/></symbol>
+    <symbol id="i-sparkles" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6L12 3ZM19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8L19 15Z"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 4 4L19 6"/></symbol>
+  </svg>
 
-  <main>
-    <section class="chat-panel">
-      <div id="messages" class="messages">
-        <div class="message assistant">
-          <div class="bubble">
-            Bonjour 👋 Je réponds à partir de la base de connaissances stockée dans le graphe
-            Fluree. Posez-moi une question, ou ajoutez d'abord des documents à indexer
-            (onglet « Documents »).
-          </div>
-        </div>
+  <div class="app" id="app">
+    <aside class="sidebar" aria-label="Navigation">
+      <div class="sidebar__top">
+        <a class="brand" href="/" aria-label="GraphRag with Fluree">
+          <span class="brand__mark"><svg class="icon"><use href="#i-logo"/></svg></span>
+          <span class="brand__text"><strong>GraphRag</strong><span>with Fluree</span></span>
+        </a>
+        <button class="icon-btn" id="closeSidebar" title="Fermer le panneau" aria-label="Fermer le panneau">
+          <svg class="icon icon--sm"><use href="#i-menu"/></svg>
+        </button>
       </div>
-      <form id="chat-form" class="composer">
-        <input id="question" name="question" type="text" placeholder="Ex : Quel est l'architecture de l'application ?" autocomplete="off" required>
-        <button type="submit" id="send-btn">Envoyer</button>
-      </form>
-    </section>
 
-    <aside class="side-panel">
-      <nav class="tabs">
-        <button id="tab-docs" class="tab active">Documents</button>
-        <button id="tab-gpu" class="tab">GPU &amp; modèles</button>
+      <button class="btn btn--primary btn--block" id="newChat">
+        <svg class="icon"><use href="#i-plus"/></svg>
+        Nouvelle conversation
+      </button>
+
+      <div class="search">
+        <svg class="icon"><use href="#i-search"/></svg>
+        <input id="searchInput" type="search" placeholder="Rechercher une conversation" aria-label="Rechercher une conversation">
+        <kbd>Ctrl K</kbd>
+      </div>
+
+      <nav class="conversations" id="conversations" aria-label="Conversations">
+        <p class="conv-empty">Aucune conversation pour l'instant.</p>
       </nav>
 
-      <section id="view-docs" class="view">
-        <h2>Ajouter des documents</h2>
-        <p class="hint">Formats supportés : <code>.md</code>, <code>.txt</code>, <code>.pdf</code>.
-          Les fichiers sont découpés en chunks, embeddés puis stockés dans Fluree.</p>
-        <form id="upload-form">
-          <input type="file" id="file-input" name="files" accept=".md,.markdown,.txt,.pdf" multiple>
-          <button type="submit" id="upload-btn">Indexer les fichiers</button>
-        </form>
-        <div id="ingest-result" class="result"></div>
-        <h2>Depuis le terminal</h2>
-        <p class="hint">Placez vos fichiers dans le dossier <code>docs/</code> puis :</p>
-        <pre>docker compose exec backend python ingest.py docs/</pre>
+      <div class="sidebar__bottom">
+        <button class="kb-card" id="openIngest">
+          <span class="kb-card__icon"><svg class="icon"><use href="#i-database"/></svg></span>
+          <span class="kb-card__text">
+            <strong>Base de connaissances</strong>
+            <span id="kbMeta">Indexer des documents</span>
+          </span>
+          <svg class="icon"><use href="#i-chevron-right"/></svg>
+        </button>
+
+        <div class="model-card" id="modelCard" role="button" tabindex="0" title="État des modèles">
+          <span class="dot" id="statusDot" aria-hidden="true"></span>
+          <span class="model-card__text">
+            <strong id="modelCardName">Connexion…</strong>
+            <span id="modelCardMeta">Ollama · Fluree</span>
+          </span>
+          <button class="icon-btn icon-btn--sm" id="openModels" title="Paramètres du modèle" aria-label="Paramètres du modèle">
+            <svg class="icon icon--sm"><use href="#i-settings"/></svg>
+          </button>
+        </div>
+
+        <div class="user-card">
+          <span class="avatar" id="ledgerAvatar">F</span>
+          <span class="user-card__text">
+            <strong id="instanceName">Instance locale</strong>
+            <span id="instanceMeta">Fluree · kb/main</span>
+          </span>
+          <button class="icon-btn icon-btn--sm" id="openInstance" title="État des services" aria-label="État des services">
+            <svg class="icon icon--sm"><use href="#i-chevron-right"/></svg>
+          </button>
+        </div>
+      </div>
+    </aside>
+
+    <div class="overlay" id="overlay"></div>
+
+    <main class="main">
+      <header class="topbar">
+        <button class="icon-btn" id="openSidebar" title="Ouvrir le panneau" aria-label="Ouvrir le panneau">
+          <svg class="icon"><use href="#i-menu"/></svg>
+        </button>
+        <div class="topbar__title">
+          <h1 id="chatTitle">Nouvelle conversation</h1>
+          <span class="badge badge--soft">Local · privé</span>
+          <span class="status-pill" id="serviceStatus" title="État des services">
+            <span class="status-pill__dot"></span>
+            <span id="serviceStatusText">Connexion…</span>
+          </span>
+        </div>
+        <div class="topbar__actions">
+          <div class="model-picker" id="modelPicker">
+            <button class="model-picker__btn" id="modelButton" aria-haspopup="menu" aria-expanded="false">
+              <span class="dot" id="modelDot" aria-hidden="true"></span>
+              <span>Modèle&nbsp;: <strong id="modelName">chargement…</strong></span>
+              <svg class="icon"><use href="#i-chevron-down"/></svg>
+            </button>
+            <div class="menu" id="modelMenu" role="menu">
+              <p class="menu__label">État des modèles</p>
+              <div class="menu-item is-static">Chargement…</div>
+            </div>
+          </div>
+
+          <button class="icon-btn" id="themeToggle" title="Changer de thème" aria-label="Changer de thème">
+            <svg class="icon"><use id="themeIcon" href="#i-moon"/></svg>
+          </button>
+
+          <div class="more-picker" id="morePicker">
+            <button class="icon-btn" id="moreActions" title="Plus d'options" aria-label="Plus d'options" aria-haspopup="menu" aria-expanded="false">
+              <svg class="icon"><use href="#i-more"/></svg>
+            </button>
+            <div class="menu" id="moreMenu" role="menu">
+              <p class="menu__label">Conversation</p>
+              <button class="menu-item" id="exportConversation" role="menuitem">
+                <svg class="icon"><use href="#i-doc"/></svg>
+                Exporter en Markdown
+              </button>
+              <button class="menu-item" id="newChatMenu" role="menuitem">
+                <svg class="icon"><use href="#i-plus"/></svg>
+                Nouvelle conversation
+              </button>
+              <div class="menu-sep"></div>
+              <p class="menu__label">Base de connaissances</p>
+              <button class="menu-item" id="openDocsMenu" role="menuitem">
+                <svg class="icon"><use href="#i-database"/></svg>
+                Importer des documents
+              </button>
+              <button class="menu-item" id="openModelsMenu" role="menuitem">
+                <svg class="icon"><use href="#i-settings"/></svg>
+                GPU &amp; modèles
+              </button>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <section class="chat" id="chat" aria-live="polite">
+        <div class="chat__inner" id="messages">
+          <div class="empty-state" id="emptyState">
+            <div class="empty-state__logo"><svg class="icon"><use href="#i-logo"/></svg></div>
+            <h2 id="emptyHeading">Comment puis-je vous aider ?</h2>
+            <p id="emptySubtitle">Interrogez votre base de connaissances. Les réponses sont générées localement et citent toujours leurs sources.</p>
+
+            <div class="suggestions" id="suggestions"></div>
+
+            <div class="suggestions-meta">
+              <svg class="icon"><use href="#i-settings"/></svg>
+              <span>Cartes configurables</span>
+              <code id="suggestionsSource">suggestions.json</code>
+            </div>
+
+            <p class="privacy-note">
+              <svg class="icon"><use href="#i-shield"/></svg>
+              Recherche et génération 100 % locales.
+            </p>
+          </div>
+        </div>
       </section>
 
-      <section id="view-gpu" class="view hidden">
-        <h2>Accélération GPU</h2>
-        <div id="gpu-status" class="result">Chargement…</div>
-        <h2>Modèles Ollama</h2>
-        <div id="models-status" class="result">Chargement…</div>
-      </section>
-    </aside>
-  </main>
+      <footer class="composer-wrap">
+        <div class="composer">
+          <textarea id="composer" rows="1" placeholder="Posez une question sur vos documents…" aria-label="Votre question"></textarea>
+          <div class="composer__bar">
+            <div class="composer__left">
+              <input type="file" id="fileInput" hidden accept=".md,.markdown,.txt,.pdf">
+              <button class="icon-btn" id="attachButton" title="Indexer un document" aria-label="Indexer un document">
+                <svg class="icon"><use href="#i-paperclip"/></svg>
+              </button>
+              <span class="attachment" id="attachment">
+                <svg class="icon icon--sm"><use href="#i-doc"/></svg>
+                <span class="attachment__name" id="attachmentName"></span>
+                <button class="icon-btn" id="removeAttachment" title="Retirer" aria-label="Retirer le fichier">
+                  <svg class="icon icon--sm"><use href="#i-close"/></svg>
+                </button>
+              </span>
+              <button class="chip" id="openLibraryChip">
+                <svg class="icon"><use href="#i-database"/></svg>
+                Documents
+              </button>
+            </div>
+            <div class="composer__right">
+              <span class="hint">Entrée pour envoyer · Maj+Entrée pour un retour à la ligne</span>
+              <button class="send" id="sendButton" disabled title="Envoyer" aria-label="Envoyer">
+                <svg class="icon"><use href="#i-send"/></svg>
+              </button>
+            </div>
+          </div>
+        </div>
+        <p class="disclaimer">GraphRag peut faire des erreurs. Vérifiez les informations importantes dans les sources citées.</p>
+      </footer>
+    </main>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <div class="modal" id="libraryModal" hidden>
+    <div class="modal__backdrop" data-close-library></div>
+    <div class="modal__panel" role="dialog" aria-modal="true" aria-labelledby="libraryTitle">
+      <header class="modal__head">
+        <div>
+          <p class="modal__eyebrow">Espace local</p>
+          <h2 id="libraryTitle">Base de connaissances</h2>
+          <p class="modal__meta" id="libraryMeta">Fluree · Ollama</p>
+        </div>
+        <button class="icon-btn" id="closeLibrary" title="Fermer" aria-label="Fermer">
+          <svg class="icon"><use href="#i-close"/></svg>
+        </button>
+      </header>
+      <nav class="modal-tabs" aria-label="Sections">
+        <button class="modal-tab active" data-tab="docs">Documents</button>
+        <button class="modal-tab" data-tab="gpu">GPU &amp; modèles</button>
+      </nav>
+      <div class="modal__body">
+        <section class="modal-view" id="modalDocs">
+          <h3>Ajouter des documents</h3>
+          <p class="hint">Formats supportés : <code>.md</code>, <code>.txt</code>, <code>.pdf</code>. Les fichiers sont découpés en chunks, embeddés puis stockés dans Fluree.</p>
+          <form id="uploadForm" class="upload-form">
+            <input type="file" id="libraryFiles" name="files" accept=".md,.markdown,.txt,.pdf" multiple>
+            <button type="submit" class="btn btn--primary" id="uploadBtn">Indexer les fichiers</button>
+          </form>
+          <div id="ingestResult" class="result"></div>
+          <h3>Depuis le terminal</h3>
+          <p class="hint">Placez vos fichiers dans le dossier <code>docs/</code> puis :</p>
+          <pre>docker compose exec backend python ingest.py docs/</pre>
+        </section>
+        <section class="modal-view" id="modalGpu" hidden>
+          <div class="modal-section-head">
+            <h3>Accélération GPU</h3>
+            <button class="btn" id="refreshGpu">Rafraîchir</button>
+          </div>
+          <div id="gpuStatus" class="result">Chargement…</div>
+          <h3>Modèles Ollama</h3>
+          <div id="modelsStatus" class="result">Chargement…</div>
+        </section>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal" id="sourceModal" hidden>
+    <div class="modal__backdrop" data-close-source></div>
+    <div class="modal__panel modal__panel--narrow" role="dialog" aria-modal="true" aria-labelledby="sourceTitle">
+      <header class="modal__head">
+        <div>
+          <p class="modal__eyebrow">Extrait de source</p>
+          <h2 id="sourceTitle">Document</h2>
+          <p class="modal__meta" id="sourceMeta"></p>
+        </div>
+        <button class="icon-btn" id="closeSourceModal" title="Fermer" aria-label="Fermer">
+          <svg class="icon"><use href="#i-close"/></svg>
+        </button>
+      </header>
+      <div class="source-view" id="sourceSnippet"></div>
+      <footer class="modal__foot">
+        <span class="badge" id="sourceScore"></span>
+      </footer>
+    </div>
+  </div>
 
   <script src="/static/app.js"></script>
 </body>

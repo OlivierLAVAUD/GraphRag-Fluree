@@ -196,10 +196,7 @@ async def chat(request: ChatRequest) -> StreamingResponse:
                 )
                 return
 
-            sources = [
-                {"source": h["source"], "index": h["index"], "score": h["score"]}
-                for h in hits
-            ]
+            sources = [_source_payload(hit) for hit in hits]
             yield _event({"type": "sources", "sources": sources})
 
             # Aucun extrait pertinent : on interroge quand même le LLM. Le prompt
@@ -276,6 +273,19 @@ async def history() -> dict:
         raise HTTPException(
             status_code=503, detail=f"Historique indisponible : {exc}"
         ) from exc
+
+
+def _source_payload(hit: dict) -> dict:
+    """Métadonnées de source + court extrait, sans renvoyer le chunk complet."""
+    content = " ".join(str(hit.get("content") or "").split())
+    if len(content) > 240:
+        content = content[:240].rstrip() + "…"
+    return {
+        "source": hit["source"],
+        "index": hit["index"],
+        "score": hit["score"],
+        "snippet": content,
+    }
 
 
 def _event(payload: dict) -> str:

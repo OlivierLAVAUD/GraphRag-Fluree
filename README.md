@@ -84,15 +84,16 @@ Ouvrez ensuite **http://localhost:8000** :
 
 ### Interface web (http://localhost:8000)
 
-- **Chat** : questions en streaming, réponses citées avec les sources récupérées.
+- **Chat** : questions en streaming, réponses citées avec les sources récupérées, historique local et export Markdown.
 - **Documents** : upload multiple (`.md`, `.txt`, `.pdf`) + rapports d'indexation.
 - **GPU & modèles** : état du GPU vu par Ollama et modèles chargés.
+- **Suggestions** : les cartes de l'écran d'accueil sont configurables dans `backend/app/static/suggestions.json`.
 
 ### API
 
 | Méthode | Endpoint | Rôle |
 |---|---|---|
-| `POST` | `/api/chat` | `{"question": "..."}` → réponse en SSE (événements `token`, `sources`, `done`) |
+| `POST` | `/api/chat` | `{"question": "..."}` → réponse en SSE (événements `token`, `sources` avec extrait, `done`) |
 | `POST` | `/api/search` | `{"question": "...", "top_k": 7, "source": "...", "entity": "..."}` → renvoie les chunks les plus pertinents (sans génération) ; `source` et `entity` sont des filtres optionnels |
 | `POST` | `/api/ingest` | Multipart `files` → indexe des documents dans Fluree |
 | `GET`  | `/api/status` | Ledger, modèles, état des services |

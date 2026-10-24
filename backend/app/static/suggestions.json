@@ -1,0 +1,35 @@
+{
+  "heading": "Comment puis-je vous aider ?",
+  "subtitle": "Interrogez votre base de connaissances. Les réponses sont générées localement et citent toujours leurs sources.",
+  "columns": 2,
+  "suggestions": [
+    {
+      "title": "Interroger la base",
+      "description": "Quelles entreprises fournissent des solutions de calcul quantique ?",
+      "prompt": "Quelles entreprises françaises fournissent des solutions de calcul quantique ?",
+      "icon": "check-search",
+      "enabled": true
+    },
+    {
+      "title": "Résumer un document",
+      "description": "Résume les points clés du rapport France 2030.",
+      "prompt": "Résume les points clés du rapport France 2030.",
+      "icon": "doc",
+      "enabled": true
+    },
+    {
+      "title": "Comparer des sources",
+      "description": "Compare les informations de La Tribune et du Figaro.",
+      "prompt": "Compare les informations de La Tribune et du Figaro sur le partenariat Microsoft-Mistral.",
+      "icon": "compare",
+      "enabled": true
+    },
+    {
+      "title": "Vérifier une affirmation",
+      "description": "Le partenariat implique-t-il une prise de participation ?",
+      "prompt": "Le partenariat Microsoft-Mistral implique-t-il une prise de participation ?",
+      "icon": "shield",
+      "enabled": true
+    }
+  ]
+}
