@@ -14,12 +14,21 @@ Règles strictes :
 
 
 def build_messages(question: str, hits: list[dict]) -> list[dict]:
-    """Construit les messages system + user avec le contexte récupéré."""
+    """Construit les messages system + user avec le contexte récupéré.
+
+    Si aucun extrait n'est pertinent, le contexte reste explicite et vide :
+    c'est le modèle qui décide de refuser, plutôt qu'une réponse figée côté
+    code (il peut ainsi saluer l'utilisateur ou demander une reformulation).
+    """
     context_parts = [
         f"[{i + 1}] Source : {h['source']} (extrait n°{h['index']})\n{h['content']}"
         for i, h in enumerate(hits)
     ]
-    context = "\n\n".join(context_parts)
+    context = (
+        "\n\n".join(context_parts)
+        if context_parts
+        else "(aucun extrait pertinent trouvé dans la base de connaissances)"
+    )
     user_content = f"Contexte :\n{context}\n\nQuestion : {question}"
     return [
         {"role": "system", "content": SYSTEM_PROMPT},

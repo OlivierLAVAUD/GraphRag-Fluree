@@ -18,7 +18,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Ingère des documents (Markdown/texte/PDF) dans le graphe Fluree du chatbot RAG."
     )
-    parser.add_argument("paths", nargs="+", type=Path, help="Fichiers ou dossiers à ingérer")
+    parser.add_argument(
+        "paths", nargs="+", type=Path, help="Fichiers ou dossiers à ingérer"
+    )
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(message)s")

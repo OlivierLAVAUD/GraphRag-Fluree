@@ -3,7 +3,7 @@
 ## Quels modèles d'IA sont utilisés ?
 
 Deux modèles locaux via Ollama :
-- **llama3.1:8b** pour la génération des réponses (quantifié Q4, environ 4,9 Go en VRAM).
+- **llama3.2:3b** pour la génération des réponses (quantifié Q4, environ 2,6 Go en VRAM).
 - **nomic-embed-text** pour transformer les textes en vecteurs de 768 dimensions (environ 0,3 Go).
 
 ## Mes données partent-elles sur Internet ?
@@ -12,7 +12,7 @@ Non. L'inférence, les embeddings et le stockage s'exécutent entièrement en lo
 
 ## Pourquoi un graphe de connaissances plutôt qu'une simple base vectorielle ?
 
-Fluree est un graphe versionné (ledger) : chaque insertion est horodatée et l'historique complet est consultable via l'API `/v1/fluree/history`. On peut donc auditer exactement quelles données alimentent le RAG, vérifier leur provenance et garantir des réponses traçables et fiables. De plus, le modèle de données RDF/JSON-LD permet d'enrichir la connaissance avec des relations sémantiques entre entités.
+Fluree est un graphe versionné (ledger) : chaque insertion est horodatée et l'historique complet est conservé. L'application l'expose via `GET /api/history` ; le serveur Fluree fournit aussi ses propres API d'historique (`/log`, `/show`). On peut donc auditer exactement quelles données alimentent le RAG, vérifier leur provenance et garantir des réponses traçables et fiables. De plus, le modèle de données RDF/JSON-LD permet d'enrichir la connaissance avec des relations sémantiques entre entités.
 
 ## Comment ajouter de nouvelles connaissances ?
 
@@ -27,7 +27,7 @@ Déposez des fichiers Markdown, texte ou PDF via l'interface web ou la CLI d'ing
 
 ## La carte graphique est-elle suffisante ?
 
-Une RTX 3060 (6 Go de VRAM) est suffisante : llama3.1:8b en Q4 occupe ~4,9 Go et nomic-embed-text ~0,3 Go. Évitez d'avoir d'autres applications GPU ouvertes. Si la mémoire manque, Ollama bascule automatiquement une partie du calcul sur CPU (plus lent), ou vous pouvez choisir un modèle plus léger comme `phi4-mini:3.8b`.
+Une RTX 3060 (6 Go de VRAM) est suffisante : llama3.2:3b en Q4 occupe ~2,6 Go et nomic-embed-text ~0,3 Go, soit les deux modèles chargés simultanément sur le GPU. Un modèle 8B (~4,9 Go) ne tient pas avec le modèle d'embeddings et une partie du calcul bascule sur CPU : la génération devient très lente, avec des rechargements de plusieurs minutes. Évitez aussi d'avoir d'autres applications GPU ouvertes.
 
 ## Puis-je changer de modèle ?
 

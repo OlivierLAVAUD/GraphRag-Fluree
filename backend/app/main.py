@@ -3,14 +3,14 @@
 import asyncio
 import json
 import logging
-import queue
 import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
 
 from . import config, fluree, ingester, ollama_client as ollama, prompts, retriever
 
@@ -29,7 +29,9 @@ async def _wait_for(service: str, check, timeout: float = 120.0) -> None:
             return
         await asyncio.sleep(2)
         waited += 2
-    log.warning("Service %s non prêt après %ss — l'application continuera.", service, timeout)
+    log.warning(
+        "Service %s non prêt après %ss — l'application continuera.", service, timeout
+    )
 
 
 @asynccontextmanager
@@ -41,6 +43,64 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(title="GraphRag-Fluree", lifespan=lifespan)
+
+
+class ChatRequest(BaseModel):
+    question: str = Field(max_length=config.MAX_QUESTION_LENGTH)
+
+
+class SearchRequest(BaseModel):
+    question: str = Field(max_length=config.MAX_QUESTION_LENGTH)
+    top_k: int = Field(default=config.TOP_K, ge=1, le=config.MAX_TOP_K)
+    source: str | None = Field(default=None, max_length=500)
+    entity: str | None = Field(default=None, max_length=200)
+
+
+def require_api_token(
+    x_api_token: str | None = Header(default=None, alias="X-API-Token"),
+    authorization: str | None = Header(default=None),
+) -> None:
+    """Protège les endpoints sensibles si API_TOKEN est configuré (sinon no-op)."""
+    if not config.API_TOKEN:
+        return
+    token = x_api_token
+    if authorization and authorization.lower().startswith("bearer "):
+        token = authorization[7:]
+    if token != config.API_TOKEN:
+        raise HTTPException(status_code=401, detail="Jeton d'API manquant ou invalide.")
+
+
+# Un sémaphore par boucle asyncio (les tests instancient plusieurs boucles).
+_chat_semaphores: dict[object, asyncio.Semaphore] = {}
+
+
+def _chat_semaphore() -> asyncio.Semaphore:
+    loop = asyncio.get_running_loop()
+    semaphore = _chat_semaphores.get(loop)
+    if semaphore is None:
+        semaphore = asyncio.Semaphore(config.MAX_CONCURRENT_CHATS)
+        _chat_semaphores[loop] = semaphore
+    return semaphore
+
+
+async def _read_limited(upload: UploadFile, limit: int) -> bytes:
+    """Lit un upload par blocs en refusant de dépasser *limit* octets."""
+    data = bytearray()
+    while True:
+        chunk = await upload.read(1024 * 1024)
+        if not chunk:
+            break
+        data.extend(chunk)
+        if len(data) > limit:
+            raise HTTPException(
+                status_code=413,
+                detail=(
+                    f"Fichier trop volumineux (> {limit} octets, "
+                    f"limite {config.MAX_UPLOAD_SIZE} par fichier / "
+                    f"{config.MAX_TOTAL_UPLOAD_SIZE} par requête)."
+                ),
+            )
+    return bytes(data)
 
 
 @app.get("/")
@@ -72,25 +132,37 @@ async def gpu() -> dict:
     try:
         return ollama.gpu_status()
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=503, detail=f"Ollama injoignable : {exc}") from exc
+        raise HTTPException(
+            status_code=503, detail=f"Ollama injoignable : {exc}"
+        ) from exc
 
 
-@app.post("/api/ingest")
+@app.post("/api/ingest", dependencies=[Depends(require_api_token)])
 async def ingest(files: list[UploadFile] = File(...)) -> dict:
     """Ingère des fichiers Markdown/texte/PDF dans le graphe Fluree."""
+    if len(files) > config.MAX_UPLOAD_FILES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Trop de fichiers ({len(files)}, limite {config.MAX_UPLOAD_FILES}).",
+        )
     results = []
+    total_bytes = 0
     for upload in files:
-        data = await upload.read()
-        if len(data) > config.MAX_UPLOAD_SIZE:
+        filename = upload.filename or "fichier"
+        suffix = Path(filename).suffix.lower()
+        if suffix not in config.SUPPORTED_EXTENSIONS:
             raise HTTPException(
-                status_code=413,
-                detail=f"Fichier trop volumineux ({len(data)} octets, limite {config.MAX_UPLOAD_SIZE}).",
+                status_code=400,
+                detail=f"Extension non supportée : {suffix or '(aucune)'}.",
             )
-        text = ingester.read_bytes(data, upload.filename or "fichier")
-        chunks = await asyncio.to_thread(ingester.ingest_text, text, upload.filename or "fichier")
+        remaining = config.MAX_TOTAL_UPLOAD_SIZE - total_bytes
+        data = await _read_limited(upload, min(config.MAX_UPLOAD_SIZE, remaining))
+        total_bytes += len(data)
+        text = ingester.read_bytes(data, filename)
+        chunks = await asyncio.to_thread(ingester.ingest_text, text, filename)
         results.append(
             {
-                "file": upload.filename,
+                "file": filename,
                 "chars": len(text),
                 "chunks": len(chunks),
             }
@@ -99,94 +171,111 @@ async def ingest(files: list[UploadFile] = File(...)) -> dict:
     return {"ingested": results}
 
 
-@app.post("/api/chat")
-async def chat(request: dict) -> StreamingResponse:
+@app.post("/api/chat", dependencies=[Depends(require_api_token)])
+async def chat(request: ChatRequest) -> StreamingResponse:
     """Répond à une question : retrieval dans Fluree + génération streaming via Ollama."""
-    question = (request.get("question") or "").strip()
+    question = request.question.strip()
     if not question:
         raise HTTPException(status_code=400, detail="La question est vide.")
 
+    semaphore = _chat_semaphore()
+    if semaphore.locked():
+        raise HTTPException(
+            status_code=429,
+            detail="Trop de générations simultanées, réessayez dans un instant.",
+        )
+    await semaphore.acquire()
+
     async def sse():
         try:
-            hits = await asyncio.to_thread(retriever.retrieve, question)
-        except Exception as exc:  # noqa: BLE001
-            yield _event({"type": "error", "message": f"Recherche impossible : {exc}"})
-            return
-
-        sources = [
-            {"source": h["source"], "index": h["index"], "score": h["score"]} for h in hits
-        ]
-        yield _event({"type": "sources", "sources": sources})
-
-        if not hits:
-            for line in (
-                "Je ne dispose pas d'information pertinente dans ma base de connaissances "
-                "pour répondre à cette question. Ingérez d'abord des documents "
-                "(onglet « Documents »)."
-            ).split(" "):
-                yield _event({"type": "token", "content": line + " "})
-                await asyncio.sleep(0.02)
-            yield _event({"type": "done", "sources": sources})
-            return
-
-        messages = prompts.build_messages(question, hits)
-        deltas: queue.Queue = queue.Queue()
-
-        def producer():
             try:
-                ollama.chat_stream(messages, on_delta=deltas.put)
+                hits = await asyncio.to_thread(retriever.retrieve, question)
             except Exception as exc:  # noqa: BLE001
-                deltas.put(exc)
-            finally:
-                deltas.put(None)
-
-        threading.Thread(target=producer, daemon=True).start()
-
-        while True:
-            item = deltas.get()
-            if item is None:
-                break
-            if isinstance(item, Exception):
-                yield _event({"type": "error", "message": f"Génération interrompue : {item}"})
+                yield _event(
+                    {"type": "error", "message": f"Recherche impossible : {exc}"}
+                )
                 return
-            yield _event({"type": "token", "content": item})
 
-        yield _event({"type": "done", "sources": sources})
+            sources = [
+                {"source": h["source"], "index": h["index"], "score": h["score"]}
+                for h in hits
+            ]
+            yield _event({"type": "sources", "sources": sources})
+
+            # Aucun extrait pertinent : on interroge quand même le LLM. Le prompt
+            # système lui demande de refuser honnêtement, ce qui permet aussi de
+            # répondre à une salutation ou de demander une reformulation.
+            messages = prompts.build_messages(question, hits)
+
+            # La génération tourne dans un thread (client httpx synchrone), mais
+            # le générateur SSE ne doit jamais bloquer la boucle asyncio.
+            # On passe donc par une asyncio.Queue alimentée par
+            # call_soon_threadsafe.
+            loop = asyncio.get_running_loop()
+            deltas: asyncio.Queue = asyncio.Queue()
+
+            def emit(item) -> None:
+                loop.call_soon_threadsafe(deltas.put_nowait, item)
+
+            def producer():
+                try:
+                    ollama.chat_stream(messages, on_delta=emit)
+                except Exception as exc:  # noqa: BLE001
+                    emit(exc)
+                finally:
+                    emit(None)
+
+            threading.Thread(target=producer, daemon=True).start()
+
+            while True:
+                item = await deltas.get()
+                if item is None:
+                    break
+                if isinstance(item, Exception):
+                    yield _event(
+                        {"type": "error", "message": f"Génération interrompue : {item}"}
+                    )
+                    return
+                yield _event({"type": "token", "content": item})
+
+            yield _event({"type": "done", "sources": sources})
+        finally:
+            semaphore.release()
 
     return StreamingResponse(sse(), media_type="text/event-stream")
 
 
-@app.post("/api/search")
-async def search(request: dict) -> dict:
+@app.post("/api/search", dependencies=[Depends(require_api_token)])
+async def search(request: SearchRequest) -> dict:
     """Recherche sémantique pure (sans génération) : renvoie les chunks les plus pertinents."""
-    question = (request.get("question") or "").strip()
+    question = request.question.strip()
     if not question:
         raise HTTPException(status_code=400, detail="La question est vide.")
-    try:
-        top_k = int(request.get("top_k", config.TOP_K))
-    except (TypeError, ValueError):
-        top_k = config.TOP_K
-    source = request.get("source")
-    entity = request.get("entity")
     hits = await asyncio.to_thread(
-        retriever.retrieve, question, top_k=top_k, source=source, entity=entity
+        retriever.retrieve,
+        question,
+        top_k=request.top_k,
+        source=request.source,
+        entity=request.entity,
     )
     return {
         "question": question,
-        "top_k": top_k,
+        "top_k": request.top_k,
         "min_score": config.RETRIEVAL_MIN_SCORE,
         "results": hits,
     }
 
 
-@app.get("/api/history")
+@app.get("/api/history", dependencies=[Depends(require_api_token)])
 async def history() -> dict:
     """Consulte l'évolution des insertions dans Fluree."""
     try:
         entries = await asyncio.to_thread(fluree.history)
         return {"history": entries}
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=503, detail=f"Historique indisponible : {exc}") from exc
+        raise HTTPException(
+            status_code=503, detail=f"Historique indisponible : {exc}"
+        ) from exc
 
 
 def _event(payload: dict) -> str:

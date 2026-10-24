@@ -23,7 +23,10 @@ def test_prompt_requires_complete_lists():
 
 
 def test_prompt_keeps_refusal_template():
-    assert "Je ne dispose pas de cette information dans ma base de connaissances." in SYSTEM_PROMPT
+    assert (
+        "Je ne dispose pas de cette information dans ma base de connaissances."
+        in SYSTEM_PROMPT
+    )
     assert "Cite tes sources" in SYSTEM_PROMPT
 
 
@@ -33,3 +36,11 @@ def test_build_messages_embeds_question_and_hits():
     assert messages[0]["role"] == "system"
     assert "Question de test ?" in messages[1]["content"]
     assert "doc.md" in messages[1]["content"]
+
+
+def test_build_messages_without_hits_signals_empty_context():
+    """Sans extrait pertinent, le prompt reste valide et laisse le LLM répondre."""
+    messages = build_messages("Bonjour ?", [])
+    assert "Bonjour ?" in messages[1]["content"]
+    assert "aucun extrait pertinent" in messages[1]["content"]
+    assert "Source :" not in messages[1]["content"]

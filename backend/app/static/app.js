@@ -14,8 +14,14 @@ async function refreshStatus() {
   try {
     const res = await fetch("/api/status");
     const data = await res.json();
-    const hasChat = data.ollama_models.includes(data.chat_model);
-    const hasEmbed = data.ollama_models.includes(data.embed_model);
+    // Ollama renvoie les noms avec un tag (`nomic-embed-text:latest`) alors que
+    // la config peut n'en préciser aucun : on normalise avant de comparer,
+    // sinon le modèle installé apparaît à tort en rouge.
+    const withTag = (name) =>
+      !name || name.includes(":") ? name : `${name}:latest`;
+    const installed = data.ollama_models.map(withTag);
+    const hasChat = installed.includes(withTag(data.chat_model));
+    const hasEmbed = installed.includes(withTag(data.embed_model));
     const chip = (ok, label) => `<span class="${ok ? "ok" : "err"}">${ok ? "●" : "○"} ${label}</span>`;
     $("#header-status").innerHTML =
       `Ledger : <b>${data.ledger}</b> · ` +

@@ -148,23 +148,56 @@ def evaluate(question: str, expected: str, expected_absence: bool) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def _first_existing(paths):
-    for p in paths:
-        if Path(p).exists():
-            return p
-    return paths[0]
+BACKEND_DIR = Path(__file__).resolve().parent
+REPO_DIR = BACKEND_DIR.parent
+
+
+def _first_existing(paths: list[Path], label: str) -> Path:
+    """Renvoie le premier chemin existant, sinon une erreur explicite.
+
+    Les chemins sont résolus par rapport au fichier (et non au répertoire
+    courant) : le harnais fonctionne donc aussi bien dans le conteneur
+    (`/app/docs`, `/app/tests`) que depuis le dépôt (`backend/`, racine).
+    """
+    for path in paths:
+        if path.exists():
+            return path
+    candidates = ", ".join(str(p) for p in paths)
+    raise FileNotFoundError(f"{label} introuvable (chemins essayés : {candidates})")
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Évalue le pipeline RAG sur un jeu de questions.")
-    parser.add_argument("--doc", default=None, help="Document à ingérer avant l'évaluation")
+    parser = argparse.ArgumentParser(
+        description="Évalue le pipeline RAG sur un jeu de questions."
+    )
+    parser.add_argument(
+        "--doc", default=None, help="Document à ingérer avant l'évaluation"
+    )
     parser.add_argument("--qa", default=None, help="Fichier JSON du jeu de questions")
-    parser.add_argument("--out", default="eval_results.json", help="Fichier de rapport JSON")
+    parser.add_argument(
+        "--out", default="eval_results.json", help="Fichier de rapport JSON"
+    )
     args = parser.parse_args()
 
-    doc_path = args.doc or _first_existing(["/app/docs", "docs"])
-    qa_path = args.qa or _first_existing(
-        ["/app/tests/eval/qa_france2030.json", "tests/eval/qa_france2030.json"]
+    doc_path = (
+        Path(args.doc)
+        if args.doc
+        else _first_existing(
+            [BACKEND_DIR / "docs", REPO_DIR / "docs", Path("docs")],
+            "Dossier de documents",
+        )
+    )
+    qa_path = (
+        Path(args.qa)
+        if args.qa
+        else _first_existing(
+            [
+                BACKEND_DIR / "tests/eval/qa_france2030.json",
+                REPO_DIR / "tests/eval/qa_france2030.json",
+                Path("tests/eval/qa_france2030.json"),
+            ],
+            "Jeu de questions",
+        )
     )
     out_path = args.out
 
@@ -184,7 +217,9 @@ def main() -> None:
         newly = len(chunks)
         print(f"      {doc.name}: {newly} chunks")
     total = len(fluree.all_chunks())
-    print(f"      {newly} nouveaux chunks → {total} chunks dans le ledger '{config.LEDGER}'.")
+    print(
+        f"      {newly} nouveaux chunks → {total} chunks dans le ledger '{config.LEDGER}'."
+    )
 
     # 2. Boucle de questions
     print(f"[2/2] {len(qa)} questions …")
@@ -210,8 +245,10 @@ def main() -> None:
         hits = outcome["top_hits"]
         if hits:
             top = hits[0]
-            print(f"        top-hit: {top['source']}#{top['index']} (score {top['score']:.3f}) "
-                  f"— {top['snippet'][:90]}…")
+            print(
+                f"        top-hit: {top['source']}#{top['index']} (score {top['score']:.3f}) "
+                f"— {top['snippet'][:90]}…"
+            )
 
     # 3. Rapport
     scores = [r["score"] for r in results]
@@ -222,12 +259,20 @@ def main() -> None:
         "ok_count": sum(1 for s in scores if s >= 0.5),
     }
     with open(out_path, "w", encoding="utf-8") as fh:
-        json.dump({"summary": summary, "results": results}, fh, ensure_ascii=False, indent=2)
+        json.dump(
+            {"summary": summary, "results": results}, fh, ensure_ascii=False, indent=2
+        )
     print(f"\nRapport écrit dans {out_path}")
-    print(f"Résumé : {summary['ok_count']}/{summary['questions']} OK, "
-          f"score moyen {summary['mean_score']:.2f}")
-    print("\nInterprétation : un score bas peut venir du RETRIEVAL (voir top-hit) ou de la")
-    print("GENERATION (cas multi-hop/négation). Les questions expected_absence=true sont")
+    print(
+        f"Résumé : {summary['ok_count']}/{summary['questions']} OK, "
+        f"score moyen {summary['mean_score']:.2f}"
+    )
+    print(
+        "\nInterprétation : un score bas peut venir du RETRIEVAL (voir top-hit) ou de la"
+    )
+    print(
+        "GENERATION (cas multi-hop/négation). Les questions expected_absence=true sont"
+    )
     print("réussies si le modèle refuse de répondre plutôt que d'inventer.")
 
 

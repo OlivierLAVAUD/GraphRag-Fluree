@@ -16,6 +16,7 @@ log = logging.getLogger(__name__)
 # Lecture des documents (Markdown / texte brut / PDF)
 # ---------------------------------------------------------------------------
 
+
 def read_bytes(data: bytes, filename: str) -> str:
     """Décode le contenu d'un fichier en texte brut (PDF inclus)."""
     suffix = Path(filename).suffix.lower()
@@ -48,7 +49,9 @@ def _sentences(paragraph: str) -> list[str]:
     return [s.strip() for s in _SENTENCE_BOUNDARY.split(paragraph) if s.strip()]
 
 
-def chunk_text(text: str, size: int | None = None, overlap: int | None = None) -> list[str]:
+def chunk_text(
+    text: str, size: int | None = None, overlap: int | None = None
+) -> list[str]:
     """Découpe un texte en chunks ciblant ~size caractères, avec recouvrement."""
     size = size or config.CHUNK_SIZE
     overlap = overlap or config.CHUNK_OVERLAP
@@ -77,7 +80,9 @@ def _overlap_tail(previous: str, overlap: int) -> str:
     """Garde les dernières phrases du chunk précédent (recouvrement)."""
     if overlap <= 0:
         return ""
-    tail_sentences = [s.strip() for s in _SENTENCE_BOUNDARY.split(previous) if s.strip()]
+    tail_sentences = [
+        s.strip() for s in _SENTENCE_BOUNDARY.split(previous) if s.strip()
+    ]
     keep = ""
     for s in reversed(tail_sentences):
         if keep and len(keep) + len(s) + 1 > overlap:
@@ -90,11 +95,14 @@ def _overlap_tail(previous: str, overlap: int) -> str:
 # Préparation et insertion des chunks
 # ---------------------------------------------------------------------------
 
+
 def prepare_chunks(text: str, source: str) -> list[dict]:
     """Découpe un texte et construit les objets chunks (identifiants stables)."""
     chunks = []
     for index, content in enumerate(chunk_text(text)):
-        chunk_id = hashlib.sha1(f"{source}::{index}::{content}".encode()).hexdigest()[:16]
+        chunk_id = hashlib.sha1(f"{source}::{index}::{content}".encode()).hexdigest()[
+            :16
+        ]
         ents = entities.extract_entities(content)
         chunks.append(
             {
@@ -122,17 +130,47 @@ def ingest_text(text: str, source: str) -> list[dict]:
         chunk["embedding"] = embedding
     # Collecter les IDs des nouveaux chunks avant le marquage d'obsolescence
     new_ids = {c["chunk_id"] for c in chunks}
-    for start in range(0, len(chunks), 100):
-        fluree.insert_chunks(chunks[start : start + 100])
+    inserted_ids: list[str] = []
+    try:
+        for start in range(0, len(chunks), 100):
+            batch = chunks[start : start + 100]
+            fluree.insert_chunks(batch)
+            inserted_ids.extend(c["chunk_id"] for c in batch)
+    except Exception:
+        # Ingestion partielle : on désactive les chunks déjà insérés pour que
+        # l'ancienne version du document reste cohérente, puis on propage.
+        if inserted_ids:
+            fluree.mark_ids_obsolete(inserted_ids)
+        raise
     # Marquer les anciens chunks de cette source comme obsolètes
     # (après insertion réussie pour éviter la perte de données)
-    # On conserve les IDs des nouveaux chunks pour ne pas les marquer obsolètes
-    fluree.mark_obsolete(source, keep_ids=new_ids)
+    # On conserve les IDs des nouveaux chunks pour ne pas les marquer obsolètes.
+    # Si ce marquage échoue, on annule les nouveaux chunks pour ne pas laisser
+    # deux versions du document actives en même temps.
+    try:
+        fluree.mark_obsolete(source, keep_ids=new_ids)
+    except Exception:
+        fluree.mark_ids_obsolete(inserted_ids)
+        raise
     # Invalide l'index de recherche sémantique (les chunks ont changé)
     from . import retriever as _retriever
 
     _retriever.invalidate_index()
     return chunks
+
+
+def source_for_path(path: Path) -> str:
+    """Identifie un fichier par un chemin relatif stable, pas seulement son nom.
+
+    Deux fichiers homonymes dans des sous-dossiers différents doivent rester
+    distincts : sinon la ré-ingestion de l'un marque les chunks de l'autre comme
+    obsolètes. On privilégie un chemin relatif au répertoire courant ; hors de
+    ce répertoire, on retombe sur le nom du fichier.
+    """
+    try:
+        return path.resolve().relative_to(Path.cwd().resolve()).as_posix()
+    except ValueError:
+        return path.name
 
 
 def ingest_path(path: Path) -> list[tuple[str, int]]:
@@ -149,8 +187,11 @@ def ingest_path(path: Path) -> list[tuple[str, int]]:
 
     report = []
     for file in files:
+        source = source_for_path(file)
         text = read_document(file)
-        chunks = ingest_text(text, file.name)
-        report.append((file.name, len(chunks)))
-        log.info("Ingéré : %s (%d caractères, %d chunks)", file.name, len(text), len(chunks))
+        chunks = ingest_text(text, source)
+        report.append((source, len(chunks)))
+        log.info(
+            "Ingéré : %s (%d caractères, %d chunks)", source, len(text), len(chunks)
+        )
     return report

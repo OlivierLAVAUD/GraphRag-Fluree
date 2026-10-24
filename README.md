@@ -8,7 +8,7 @@ exclusivement de vos documents.
 ```
 ┌────────────┐   HTTP/SSE   ┌──────────────┐       ┌─────────────┐
 │ Interface  │ ───────────► │   backend    │ ◄────►│   Ollama    │  (GPU NVIDIA)
-│    web     │   (port 8000)│   FastAPI    │       │ llama3.1:8b │
+│    web     │   (port 8000)│   FastAPI    │       │ llama3.2:3b │
 └────────────┘              └──────┬───────┘       │ nomic-embed │
                                    │ JSON-LD       └─────────────┘
                                    ▼
@@ -57,7 +57,7 @@ docker run --rm --gpus all --device /dev/nvidia0:/dev/nvidia0 nvidia/cuda:12.4.1
 docker compose up -d --build
 ```
 
-Au **premier** démarrage, le service `ollama-init` télécharge les modèles (~5 Go) :
+Au **premier** démarrage, le service `ollama-init` télécharge les modèles (~2,5 Go) :
 
 ```bash
 docker compose logs -f ollama-init     # surveiller le téléchargement
@@ -66,7 +66,7 @@ docker compose ps                      # tout doit être Up / healthy
 
 Ouvrez ensuite **http://localhost:8000** :
 
-1. Onglet **GPU & modèles** → vérifiez que `llama3.1:8b` apparaît avec une utilisation VRAM
+1. Onglet **GPU & modèles** → vérifiez que `llama3.2:3b` apparaît avec une utilisation VRAM
    (le GPU est bien actif).
 2. Onglet **Documents** → indexez les fichiers d'exemple fournis (`docs/`) soit via
    l'interface, soit :
@@ -93,10 +93,11 @@ Ouvrez ensuite **http://localhost:8000** :
 | Méthode | Endpoint | Rôle |
 |---|---|---|
 | `POST` | `/api/chat` | `{"question": "..."}` → réponse en SSE (événements `token`, `sources`, `done`) |
-| `POST` | `/api/search` | `{"question": "...", "top_k": 7}` → renvoie les chunks les plus pertinents (sans génération) |
+| `POST` | `/api/search` | `{"question": "...", "top_k": 7, "source": "...", "entity": "..."}` → renvoie les chunks les plus pertinents (sans génération) ; `source` et `entity` sont des filtres optionnels |
 | `POST` | `/api/ingest` | Multipart `files` → indexe des documents dans Fluree |
 | `GET`  | `/api/status` | Ledger, modèles, état des services |
 | `GET`  | `/api/gpu` | Utilisation GPU / VRAM vue par Ollama |
+| `GET`  | `/api/history` | Historique des transactions du ledger, tel qu'exposé par Fluree |
 
 ### CLI d'ingestion
 
@@ -130,22 +131,36 @@ Dans `docker-compose.yml`, service `backend` :
 
 | Variable | Défaut | Rôle |
 |---|---|---|
-| `CHAT_MODEL` | `llama3.1:8b` | Modèle de génération (voir FAQ pour changer) |
+| `CHAT_MODEL` | `llama3.2:3b` | Modèle de génération (voir FAQ pour changer) |
 | `EMBED_MODEL` | `nomic-embed-text` | Modèle d'embeddings |
 | `TOP_K` | `7` | Nombre de chunks injectés dans le prompt |
 | `RETRIEVAL_MIN_SCORE` | `0.3` | Seuil de similarité : en dessous, le chunk est écarté (réduit le bruit et les réponses inventées) |
 | `CHUNK_SIZE` / `CHUNK_OVERLAP` | `500` / `80` | Découpage des documents |
 | `FLUREE_LEDGER` | `kb/main` | Nom du ledger (base) dans Fluree (ne pas réutiliser le nom d'un ledger supprimé : « Ledger has been retracted ») |
+| `INDEX_CACHE_DIR` | `/tmp/graphrag-index-cache` | Cache disque de l'index vectoriel (évite de rapatrier tous les embeddings à chaque redémarrage) |
+| `INDEX_CACHE_MAX_ENTRIES` | `32` | Nombre maximal d'index (source/entité) conservés |
+| `API_TOKEN` | *(vide)* | Si défini, exige `X-API-Token` ou `Authorization: Bearer` sur les endpoints d'écriture/chat |
+| `MAX_CONCURRENT_CHATS` | `2` | Générations simultanées autorisées (protection GPU) |
+| `MAX_UPLOAD_SIZE` / `MAX_TOTAL_UPLOAD_SIZE` | `50 Mo` / `200 Mo` | Limites par fichier / par requête |
+| `MAX_UPLOAD_FILES` | `20` | Nombre maximal de fichiers par requête |
+| `MAX_QUESTION_LENGTH` / `MAX_TOP_K` | `4000` / `50` | Bornes de validation de l'API |
 
 ## Comment ça marche
 
 1. **Ingestion** : un document est découpé en chunks (~500 caractères, recouvrement 80),
    chaque chunk est embeddé (`nomic-embed-text`, 768 dimensions) et inséré dans Fluree en
    JSON-LD : sujet `rag:Chunk`, prédicats `rag:content`, `rag:embedding`, `rag:source`,
-   `rag:chunkIndex`.
+   `rag:chunkIndex`, `rag:obsolete` et, si des entités sont détectées, `rag:mentions` vers
+   des nœuds `ent:*`. Lors d'une ré-ingestion, les anciens chunks de la source sont marqués
+   `rag:obsolete` (ils ne sont plus renvoyés par la recherche) ; les chunks ré-indexés
+   conservent un `@id` stable dérivé de leur contenu. En CLI, la source est le chemin relatif
+   au répertoire courant (deux fichiers homonymes dans des sous-dossiers restent distincts).
+   Une insertion partielle est annulée (chunks déjà insérés marqués obsolètes).
 2. **Question** : l'embedding de la question est comparé par similarité cosinus aux chunks
    du graphe (index local mis en cache pour éviter le recalcul) ; les `TOP_K` plus proches
-   sont retenus après application du seuil `RETRIEVAL_MIN_SCORE`.
+   sont retenus après application du seuil `RETRIEVAL_MIN_SCORE`. Le cache est invalidé
+   automatiquement après toute ingestion, y compris via la CLI (`ingest.py`), grâce à un
+   marqueur partagé entre processus.
 3. **Génération** : le prompt contient le contexte récupéré et ordonne au modèle de répondre
    uniquement à partir de celui-ci, en citant les sources `[1]…[k]`. La réponse est
    diffusée en streaming (SSE).

@@ -10,7 +10,10 @@ def test_tokenize_filters_stopwords():
 
 
 def test_score_overlap_perfect_and_null():
-    assert score_overlap("Le chat dort sur le canapé.", "Le chat dort sur le canapé.") == 1.0
+    assert (
+        score_overlap("Le chat dort sur le canapé.", "Le chat dort sur le canapé.")
+        == 1.0
+    )
     assert score_overlap("Bonjour le monde", "zzz yyy xxx") == 0.0
 
 
@@ -23,17 +26,19 @@ def test_score_overlap_partial():
 
 
 def test_absence_detection():
-    assert is_absence_answer("Je ne dispose pas de cette information dans ma base de connaissances.")
+    assert is_absence_answer(
+        "Je ne dispose pas de cette information dans ma base de connaissances."
+    )
     assert is_absence_answer("L'information est absente du contexte fourni.")
     assert is_absence_answer("Je ne sais pas.")
-    assert not is_absence_answer("Le déploiement concerne un million d'agents pour 700 000 euros.")
+    assert not is_absence_answer(
+        "Le déploiement concerne un million d'agents pour 700 000 euros."
+    )
     assert not is_absence_answer("")
 
 
 def test_score_semantic_mocked(monkeypatch):
     """score_semantic retourne le cosinus entre deux vecteurs d'embedding."""
-    import numpy as np
-
     import eval_rag
 
     def fake_embed_batch(texts):

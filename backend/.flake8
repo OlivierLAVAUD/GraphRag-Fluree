@@ -1,0 +1,6 @@
+[flake8]
+max-line-length = 88
+# E203/W503 : règles en conflit avec le formatage de black.
+# E501 : black ne découpe ni les chaînes ni les commentaires (prompts, URLs).
+extend-ignore = E203, E501, W503
+exclude = .venv,__pycache__,.pytest_cache

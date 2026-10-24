@@ -16,7 +16,7 @@
 
 Deux méthodes :
 
-- **Interface web** : ouvrez http://localhost:8000, onglet « Documents », sélectionnez vos fichiers (.md, .txt, .pdf) et cliquez sur « Indexer les fichiers ».
+- **Interface web** : ouvrez http://localhost:8000, onglet « Documents », sélectionnez vos fichiers (.md, .markdown, .txt, .pdf) et cliquez sur « Indexer les fichiers ».
 - **CLI** : déposez vos fichiers dans `docs/` puis exécutez :
   - `docker compose exec backend python ingest.py docs/`
 
