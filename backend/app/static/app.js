@@ -21,7 +21,7 @@
   const emptyHeading = $("#emptyHeading");
   const emptySubtitle = $("#emptySubtitle");
 
-  const libraryModal = $("#libraryModal");
+  const kbModal = $("#kbModal");
   const sourceModal = $("#sourceModal");
   const modelButton = $("#modelButton");
   const modelMenu = $("#modelMenu");
@@ -556,7 +556,12 @@
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question })
+        body: JSON.stringify({
+          question,
+          source: $("#chatSourceFilter")?.value || null,
+          entity: $("#chatEntityFilter")?.value || null,
+          top_k: Number($("#chatTopK")?.value) || undefined
+        })
       });
 
       if (!response.ok) {
@@ -886,7 +891,7 @@
       GPU &amp; modèles`;
     manage.addEventListener("click", () => {
       closeMenus();
-      openLibrary("gpu");
+      openKB("gpu");
     });
     modelMenu.appendChild(manage);
 
@@ -925,7 +930,7 @@
       $("#modelCardName").textContent = data.chat_model || "Modèle inconnu";
       $("#modelCardMeta").textContent = `${data.embed_model || "embedding"} · ${data.ledger || "Fluree"}`;
       $("#instanceMeta").textContent = `Fluree · ${data.ledger || "kb/main"}`;
-      $("#libraryMeta").textContent = `Fluree · ${data.ledger || "kb/main"} · ${data.chat_model || "modèle inconnu"}`;
+      $("#kbMeta").textContent = `Fluree · ${data.ledger || "kb/main"} · ${data.chat_model || "modèle inconnu"}`;
       $("#ledgerAvatar").textContent = String(data.ledger || "F").slice(0, 1).toUpperCase();
       renderModelMenu(data, hasChat, hasEmbed);
     } catch (error) {
@@ -995,6 +1000,254 @@
   }
 
   // ---------------------------------------------------------------------------
+  // Refonte Base de connaissances
+  // ---------------------------------------------------------------------------
+
+  async function fetchSources() {
+    try {
+      const response = await fetch("/api/sources", { cache: "no-store" });
+      if (!response.ok) throw new Error(response.statusText);
+      return (await response.json()).sources || [];
+    } catch (error) {
+      return [];
+    }
+  }
+
+  async function fetchEntities() {
+    try {
+      const response = await fetch("/api/entities", { cache: "no-store" });
+      if (!response.ok) throw new Error(response.statusText);
+      return (await response.json()).entities || [];
+    } catch (error) {
+      return [];
+    }
+  }
+
+  async function refreshSourceList() {
+    const sources = await fetchSources();
+    const list = $("#sourceList");
+    if (!list) return;
+
+    list.replaceChildren();
+    if (!sources.length) {
+      const item = document.createElement("li");
+      item.textContent = "Aucune source indexée.";
+      list.appendChild(item);
+    } else {
+      sources.forEach((source) => {
+        const item = document.createElement("li");
+        item.innerHTML = `<span></span><span class="chunks"></span>`;
+        $("span", item).textContent = source.name;
+        $(".chunks", item).textContent = `${source.chunks} chunks`;
+        list.appendChild(item);
+      });
+    }
+
+    ["#kbSourceFilter", "#chatSourceFilter"].forEach((selector) => {
+      const select = $(selector);
+      if (!select) return;
+      const current = select.value;
+      select.querySelectorAll("option:not(:first-child)").forEach((option) => option.remove());
+      sources.forEach((source) => {
+        const option = document.createElement("option");
+        option.value = source.name;
+        option.textContent = source.name;
+        select.appendChild(option);
+      });
+      select.value = current;
+    });
+  }
+
+  async function refreshEntityList() {
+    const entities = await fetchEntities();
+    const grid = $("#kbEntitiesList");
+    if (grid) {
+      grid.replaceChildren();
+      entities.forEach((entity) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "entity-chip";
+        button.innerHTML = `<strong></strong><span></span>`;
+        $("strong", button).textContent = entity.name;
+        $("span", button).textContent = `${entity.type || "entité"} · ${entity.chunks} chunks`;
+        button.addEventListener("click", () => {
+          const select = $("#kbEntityFilter");
+          if (select) select.value = entity.name;
+          switchKbTab("search");
+          const input = $("#kbSearchInput");
+          if (input) input.value = `Entité : ${entity.name}`;
+          kbSearch(entity.name, entity.name);
+        });
+        grid.appendChild(button);
+      });
+      if (!entities.length) grid.textContent = "Aucune entité détectée.";
+    }
+
+    ["#kbEntityFilter", "#chatEntityFilter"].forEach((selector) => {
+      const select = $(selector);
+      if (!select) return;
+      const current = select.value;
+      select.querySelectorAll("option:not(:first-child)").forEach((option) => option.remove());
+      entities.forEach((entity) => {
+        const option = document.createElement("option");
+        option.value = entity.name;
+        option.textContent = entity.name;
+        select.appendChild(option);
+      });
+      select.value = current;
+    });
+  }
+
+  async function refreshHistory() {
+    const list = $("#kbHistoryList");
+    if (!list) return;
+    list.textContent = "Chargement…";
+
+    try {
+      const response = await fetch("/api/history", { cache: "no-store" });
+      if (!response.ok) throw new Error(response.statusText);
+      const data = await response.json();
+      const commits = data.history || [];
+      list.replaceChildren();
+
+      if (!commits.length) {
+        list.textContent = "Aucun commit.";
+        return;
+      }
+
+      commits.forEach((commit) => {
+        const item = document.createElement("li");
+        if (typeof commit === "string") {
+          const code = document.createElement("code");
+          code.textContent = commit;
+          item.appendChild(code);
+          list.appendChild(item);
+          return;
+        }
+
+        const time = commit.time || commit.timestamp;
+        const parsed = time ? new Date(time) : null;
+        const date =
+          parsed && !Number.isNaN(parsed.valueOf())
+            ? parsed.toLocaleString("fr-FR")
+            : "commit";
+
+        const code = document.createElement("code");
+        code.textContent = commit.commit_id
+          ? String(commit.commit_id).slice(0, 12)
+          : `t=${commit.t ?? "?"}`;
+        item.append(document.createTextNode(`${date} — `), code);
+
+        const details = [];
+        if (commit.t !== undefined) details.push(`t=${commit.t}`);
+        if (commit.asserts !== undefined) details.push(`${commit.asserts} asserts`);
+        if (commit.retracts) details.push(`${commit.retracts} retracts`);
+        if (details.length) {
+          const detail = document.createElement("span");
+          detail.className = "commit-detail";
+          detail.textContent = details.join(" · ");
+          item.appendChild(detail);
+        }
+
+        list.appendChild(item);
+      });
+    } catch (error) {
+      list.textContent = `Erreur : ${error.message}`;
+    }
+  }
+
+  async function kbSearch(presetEntity, presetQuestion = null) {
+    const question = (presetQuestion || $("#kbSearchInput")?.value || "").trim();
+    if (!question) {
+      toast("Saisissez une requête.");
+      return;
+    }
+
+    const body = {
+      question,
+      top_k: Number($("#kbTopK")?.value) || 7,
+      source: $("#kbSourceFilter")?.value || null,
+      entity: presetEntity || $("#kbEntityFilter")?.value || null
+    };
+    const minScore = Number($("#kbMinScore")?.value);
+    const output = $("#kbSearchResults");
+    output.textContent = "Recherche…";
+
+    try {
+      const response = await fetch("/api/search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || response.statusText);
+
+      const results = (data.results || []).filter((hit) =>
+        !Number.isFinite(minScore) || Number(hit.score) >= minScore
+      );
+      output.replaceChildren();
+
+      results.forEach((hit) => {
+        const card = document.createElement("div");
+        card.className = "kb-result";
+        card.innerHTML = `
+          <div class="kb-result__head">
+            <strong></strong>
+            <span class="score"></span>
+          </div>
+          <div class="kb-result__snippet"></div>
+          <div class="kb-result__actions">
+            <button class="btn" data-act="tochat">Envoyer au chat</button>
+          </div>`;
+        $("strong", card).textContent = `${hit.source} · extrait #${hit.index}`;
+        $(".score", card).textContent = formatScore(hit.score);
+        $(".kb-result__snippet", card).textContent = (hit.content || "").slice(0, 240);
+        $("[data-act='tochat']", card).addEventListener("click", () => {
+          $("#composer").value = body.question;
+          if ($("#chatSourceFilter")) $("#chatSourceFilter").value = body.source || "";
+          if ($("#chatEntityFilter")) $("#chatEntityFilter").value = body.entity || "";
+          if ($("#chatTopK")) {
+            $("#chatTopK").value = String(body.top_k);
+            const out = $("#chatTopK").nextElementSibling;
+            if (out) out.textContent = String(body.top_k);
+          }
+          autoGrow();
+          updateSendState();
+          closeModal(kbModal);
+          composer.focus();
+        });
+        output.appendChild(card);
+      });
+
+      if (!output.children.length) output.textContent = "Aucun résultat au-dessus du seuil.";
+    } catch (error) {
+      output.textContent = `Erreur : ${error.message}`;
+    }
+  }
+
+  function switchKbTab(name) {
+    $$(".modal-tab").forEach((tab) => {
+      tab.classList.toggle("active", tab.dataset.kbtab === name);
+    });
+    const views = {
+      docs: "#kbDocs",
+      search: "#kbSearch",
+      entities: "#kbEntities",
+      history: "#kbHistory",
+      gpu: "#kbGpu"
+    };
+    Object.entries(views).forEach(([key, selector]) => {
+      const view = $(selector);
+      if (view) view.hidden = key !== name;
+    });
+
+    if (name === "docs") refreshSourceList();
+    if (name === "entities") refreshEntityList();
+    if (name === "history") refreshHistory();
+    if (name === "gpu") refreshGpu();
+  }
+
+  // ---------------------------------------------------------------------------
   // Modales, menus et navigation
   // ---------------------------------------------------------------------------
 
@@ -1010,19 +1263,11 @@
     }
   }
 
-  function openLibrary(tab = "docs") {
+  function openKB(tab = "docs") {
     closeSidebar();
-    openModal(libraryModal);
-    switchModalTab(tab);
-  }
-
-  function switchModalTab(name) {
-    $$(".modal-tab").forEach((tab) => {
-      tab.classList.toggle("active", tab.dataset.tab === name);
-    });
-    $("#modalDocs").hidden = name !== "docs";
-    $("#modalGpu").hidden = name !== "gpu";
-    if (name === "gpu") refreshGpu();
+    closeMenus();
+    openModal(kbModal);
+    switchKbTab(tab);
   }
 
   function closeMenus() {
@@ -1157,7 +1402,7 @@
     if (event.key === "Escape") {
       closeMenus();
       closeSidebar();
-      closeModal(libraryModal);
+      closeModal(kbModal);
       closeModal(sourceModal);
     }
   });
@@ -1184,39 +1429,61 @@
   $("#exportConversation").addEventListener("click", exportConversation);
   $("#openDocsMenu").addEventListener("click", () => {
     closeMenus();
-    openLibrary("docs");
+    openKB("docs");
   });
   $("#openModelsMenu").addEventListener("click", () => {
     closeMenus();
-    openLibrary("gpu");
+    openKB("gpu");
   });
 
-  $("#openIngest").addEventListener("click", () => openLibrary("docs"));
-  $("#openLibraryChip").addEventListener("click", () => openLibrary("docs"));
+  $("#openIngest").addEventListener("click", () => openKB("docs"));
+  $("#openLibraryChip").addEventListener("click", () => openKB("docs"));
   $("#openModels").addEventListener("click", (event) => {
     event.stopPropagation();
-    openLibrary("gpu");
+    openKB("gpu");
   });
-  $("#modelCard").addEventListener("click", () => openLibrary("gpu"));
+  $("#modelCard").addEventListener("click", () => openKB("gpu"));
   $("#modelCard").addEventListener("keydown", (event) => {
     if (event.target !== event.currentTarget) return;
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
-      openLibrary("gpu");
+      openKB("gpu");
     }
   });
-  $("#openInstance").addEventListener("click", () => openLibrary("gpu"));
+  $("#openInstance").addEventListener("click", () => openKB("gpu"));
 
-  $$("#libraryModal [data-close-library], #closeLibrary").forEach((button) => {
-    button.addEventListener("click", () => closeModal(libraryModal));
+  $$("#kbModal [data-close-kb], #closeKb").forEach((button) => {
+    button.addEventListener("click", () => closeModal(kbModal));
   });
   $$("#sourceModal [data-close-source], #closeSourceModal").forEach((button) => {
     button.addEventListener("click", () => closeModal(sourceModal));
   });
   $$(".modal-tab").forEach((tab) => {
-    tab.addEventListener("click", () => switchModalTab(tab.dataset.tab));
+    tab.addEventListener("click", () => switchKbTab(tab.dataset.kbtab));
   });
   $("#refreshGpu").addEventListener("click", refreshGpu);
+  $("#kbRefreshHistory").addEventListener("click", refreshHistory);
+  $("#kbSearchBtn").addEventListener("click", () => kbSearch());
+  $("#kbSearchInput").addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      kbSearch();
+    }
+  });
+
+  ["#chatTopK", "#kbTopK", "#kbMinScore"].forEach((selector) => {
+    const input = $(selector);
+    if (!input) return;
+    const output = input.nextElementSibling;
+    const sync = () => {
+      if (!output) return;
+      output.textContent = selector === "#kbMinScore"
+        ? Number(input.value).toFixed(2)
+        : String(input.value);
+    };
+    input.addEventListener("input", sync);
+    sync();
+  });
 
   $("#attachButton").addEventListener("click", () => fileInput.click());
   fileInput.addEventListener("change", () => ingestAttachment(fileInput.files[0]));
@@ -1242,6 +1509,8 @@
       toast(`${total} chunk(s) indexé(s).`);
       $("#libraryFiles").value = "";
       refreshStatus();
+      refreshSourceList();
+      refreshEntityList();
     } catch (error) {
       result.replaceChildren();
       const row = document.createElement("div");
@@ -1261,6 +1530,8 @@
   loadSuggestionConfig();
   renderConversations();
   refreshStatus();
+  refreshSourceList();
+  refreshEntityList();
   autoGrow();
   updateSendState();
   setTimeout(() => composer.focus(), 120);

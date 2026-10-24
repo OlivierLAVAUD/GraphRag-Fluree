@@ -78,7 +78,7 @@
           <span class="kb-card__icon"><svg class="icon"><use href="#i-database"/></svg></span>
           <span class="kb-card__text">
             <strong>Base de connaissances</strong>
-            <span id="kbMeta">Indexer des documents</span>
+            <span id="kbCardMeta">Indexer des documents</span>
           </span>
           <svg class="icon"><use href="#i-chevron-right"/></svg>
         </button>
@@ -193,6 +193,18 @@
 
       <footer class="composer-wrap">
         <div class="composer">
+          <div class="composer__filters" id="composerFilters">
+            <select id="chatSourceFilter" aria-label="Filtrer par source">
+              <option value="">Toutes sources</option>
+            </select>
+            <select id="chatEntityFilter" aria-label="Filtrer par entité">
+              <option value="">Toutes entités</option>
+            </select>
+            <label for="chatTopK">top_k
+              <input id="chatTopK" type="range" min="1" max="50" value="7">
+              <output>7</output>
+            </label>
+          </div>
           <textarea id="composer" rows="1" placeholder="Posez une question sur vos documents…" aria-label="Votre question"></textarea>
           <div class="composer__bar">
             <div class="composer__left">
@@ -227,37 +239,99 @@
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-  <div class="modal" id="libraryModal" hidden>
-    <div class="modal__backdrop" data-close-library></div>
-    <div class="modal__panel" role="dialog" aria-modal="true" aria-labelledby="libraryTitle">
+  <div class="modal" id="kbModal" hidden>
+    <div class="modal__backdrop" data-close-kb></div>
+    <div class="modal__panel modal__panel--wide" role="dialog" aria-modal="true" aria-labelledby="kbTitle">
       <header class="modal__head">
         <div>
           <p class="modal__eyebrow">Espace local</p>
-          <h2 id="libraryTitle">Base de connaissances</h2>
-          <p class="modal__meta" id="libraryMeta">Fluree · Ollama</p>
+          <h2 id="kbTitle">Base de connaissances</h2>
+          <p class="modal__meta" id="kbMeta">Fluree · Ollama</p>
         </div>
-        <button class="icon-btn" id="closeLibrary" title="Fermer" aria-label="Fermer">
+        <button class="icon-btn" id="closeKb" title="Fermer" aria-label="Fermer">
           <svg class="icon"><use href="#i-close"/></svg>
         </button>
       </header>
       <nav class="modal-tabs" aria-label="Sections">
-        <button class="modal-tab active" data-tab="docs">Documents</button>
-        <button class="modal-tab" data-tab="gpu">GPU &amp; modèles</button>
+        <button class="modal-tab active" data-kbtab="docs">Documents</button>
+        <button class="modal-tab" data-kbtab="search">Recherche</button>
+        <button class="modal-tab" data-kbtab="entities">Entités</button>
+        <button class="modal-tab" data-kbtab="history">Historique</button>
+        <button class="modal-tab" data-kbtab="gpu">GPU</button>
       </nav>
       <div class="modal__body">
-        <section class="modal-view" id="modalDocs">
+        <section class="kb-view modal-view" id="kbDocs">
           <h3>Ajouter des documents</h3>
           <p class="hint">Formats supportés : <code>.md</code>, <code>.txt</code>, <code>.pdf</code>. Les fichiers sont découpés en chunks, embeddés puis stockés dans Fluree.</p>
           <form id="uploadForm" class="upload-form">
-            <input type="file" id="libraryFiles" name="files" accept=".md,.markdown,.txt,.pdf" multiple>
+            <label class="upload-dropzone" for="libraryFiles">
+              <strong>Sélectionner des documents</strong>
+              <span class="hint">Markdown, texte ou PDF · sélection multiple</span>
+            </label>
+            <input type="file" id="libraryFiles" name="files" accept=".md,.markdown,.txt,.pdf" multiple hidden>
             <button type="submit" class="btn btn--primary" id="uploadBtn">Indexer les fichiers</button>
           </form>
           <div id="ingestResult" class="result"></div>
+
+          <h3>Sources indexées</h3>
+          <ul id="sourceList" class="source-list-kb">
+            <li>Chargement…</li>
+          </ul>
+
           <h3>Depuis le terminal</h3>
           <p class="hint">Placez vos fichiers dans le dossier <code>docs/</code> puis :</p>
           <pre>docker compose exec backend python ingest.py docs/</pre>
         </section>
-        <section class="modal-view" id="modalGpu" hidden>
+
+        <section class="kb-view modal-view" id="kbSearch" hidden>
+          <div class="kb-search-form">
+            <label for="kbSearchInput">Requête
+              <input id="kbSearchInput" type="search" placeholder="Rechercher dans les chunks…" autocomplete="off">
+            </label>
+            <label for="kbTopK">top_k
+              <input id="kbTopK" type="range" min="1" max="50" value="7">
+              <output>7</output>
+            </label>
+            <button type="button" class="btn btn--primary" id="kbSearchBtn">Rechercher</button>
+            <div class="kb-filters">
+              <label for="kbSourceFilter">Source
+                <select id="kbSourceFilter">
+                  <option value="">Toutes sources</option>
+                </select>
+              </label>
+              <label for="kbEntityFilter">Entité
+                <select id="kbEntityFilter">
+                  <option value="">Toutes entités</option>
+                </select>
+              </label>
+              <label for="kbMinScore">Score min
+                <input id="kbMinScore" type="range" min="0" max="1" step="0.05" value="0.3">
+                <output>0.30</output>
+              </label>
+            </div>
+          </div>
+          <div id="kbSearchResults" class="kb-results"></div>
+        </section>
+
+        <section class="kb-view modal-view" id="kbEntities" hidden>
+          <h3>Entités du graphe</h3>
+          <p class="hint">Cliquez sur une entité pour préparer une recherche filtrée.</p>
+          <div id="kbEntitiesList" class="entity-grid">
+            <p class="hint">Chargement…</p>
+          </div>
+        </section>
+
+        <section class="kb-view modal-view" id="kbHistory" hidden>
+          <div class="modal-section-head">
+            <h3>Historique des commits</h3>
+            <button class="btn" id="kbRefreshHistory">Rafraîchir</button>
+          </div>
+          <ul id="kbHistoryList" class="commit-timeline">
+            <li>Chargement…</li>
+          </ul>
+        </section>
+
+        <section class="kb-view modal-view" id="kbGpu" hidden>
           <div class="modal-section-head">
             <h3>Accélération GPU</h3>
             <button class="btn" id="refreshGpu">Rafraîchir</button>

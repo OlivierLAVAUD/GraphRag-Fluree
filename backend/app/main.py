@@ -47,6 +47,9 @@ app = FastAPI(title="GraphRag-Fluree", lifespan=lifespan)
 
 class ChatRequest(BaseModel):
     question: str = Field(max_length=config.MAX_QUESTION_LENGTH)
+    source: str | None = Field(default=None, max_length=500)
+    entity: str | None = Field(default=None, max_length=200)
+    top_k: int = Field(default=config.TOP_K, ge=1, le=config.MAX_TOP_K)
 
 
 class SearchRequest(BaseModel):
@@ -126,6 +129,94 @@ async def status() -> dict:
     }
 
 
+def _query_active_chunks(fields: list[str]) -> list[dict]:
+    """Interroge les chunks actifs sans charger contenu ni embeddings."""
+    payload = {
+        "@context": config.CTX,
+        "select": {"?c": fields},
+        "where": {"@id": "?c", "@type": "rag:Chunk", "rag:obsolete": False},
+    }
+    out = fluree._post(f"/query/{config.LEDGER}", payload, 120)
+    if isinstance(out, list):
+        return out
+    if isinstance(out, dict):
+        for key in ("results", "result", "bindings", "rows"):
+            if key in out:
+                return out[key]
+    raise RuntimeError(f"Réponse Fluree inattendue : {str(out)[:300]}")
+
+
+@app.get("/api/sources", dependencies=[Depends(require_api_token)])
+async def list_sources() -> dict:
+    """Liste les sources actives du graphe et leur nombre de chunks."""
+    rows = await asyncio.to_thread(_query_active_chunks, ["rag:source"])
+    counts: dict[str, int] = {}
+    for row in rows:
+        src = row.get("rag:source")
+        if src:
+            counts[src] = counts.get(src, 0) + 1
+    return {
+        "sources": [{"name": name, "chunks": n} for name, n in sorted(counts.items())]
+    }
+
+
+@app.get("/api/entities", dependencies=[Depends(require_api_token)])
+async def list_entities() -> dict:
+    """Liste les entités mentionnées par les chunks et leur fréquence."""
+    rows = await asyncio.to_thread(_query_active_chunks, ["rag:mentions"])
+    counts: dict[str, int] = {}
+    names: dict[str, str] = {}
+    types: dict[str, str] = {}
+    for row in rows:
+        mentions = row.get("rag:mentions") or []
+        if isinstance(mentions, dict):
+            mentions = [mentions]
+        for mention in mentions:
+            if not isinstance(mention, dict):
+                continue
+            ent_id = mention.get("@id")
+            if not ent_id:
+                continue
+            counts[ent_id] = counts.get(ent_id, 0) + 1
+            if mention.get("ent:name"):
+                names[ent_id] = mention["ent:name"]
+            if mention.get("@type"):
+                types[ent_id] = mention["@type"]
+
+    if any(ent_id not in names for ent_id in counts):
+        payload = {
+            "@context": config.CTX,
+            "select": {"?e": ["*"]},
+            "where": {"@id": "?e", "ent:name": "?name"},
+        }
+        try:
+            entities = await asyncio.to_thread(
+                fluree._post, f"/query/{config.LEDGER}", payload, 60
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Noms d'entités indisponibles : %s", exc)
+            entities = []
+        for entity in entities if isinstance(entities, list) else []:
+            if not isinstance(entity, dict):
+                continue
+            ent_id = entity.get("@id")
+            if ent_id in counts:
+                names[ent_id] = entity.get("ent:name") or names.get(ent_id, ent_id)
+                types[ent_id] = entity.get("@type") or types.get(ent_id, "")
+
+    result = []
+    for ent_id, chunks in counts.items():
+        fallback = str(ent_id).removeprefix("ent:").replace("_", " ")
+        result.append(
+            {
+                "name": names.get(ent_id) or fallback,
+                "type": str(types.get(ent_id, "")).removeprefix("ent:"),
+                "chunks": chunks,
+            }
+        )
+    return {"entities": sorted(result, key=lambda e: -e["chunks"])}
+
+
 @app.get("/api/gpu")
 async def gpu() -> dict:
     """État GPU vu par Ollama (/api/ps) : vérifie que l'accélération est active."""
@@ -189,7 +280,13 @@ async def chat(request: ChatRequest) -> StreamingResponse:
     async def sse():
         try:
             try:
-                hits = await asyncio.to_thread(retriever.retrieve, question)
+                hits = await asyncio.to_thread(
+                    retriever.retrieve,
+                    question,
+                    top_k=request.top_k,
+                    source=request.source,
+                    entity=request.entity,
+                )
             except Exception as exc:  # noqa: BLE001
                 yield _event(
                     {"type": "error", "message": f"Recherche impossible : {exc}"}
