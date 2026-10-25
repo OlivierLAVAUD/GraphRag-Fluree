@@ -1,121 +1,16 @@
-"""Test du pipeline RAG complet (ingestion → retrieval) SANS les services réels :
-Fluree est remplacé par un stockage mémoire, Ollama par des embeddings
-déterministes (n-grammes de caractères + tokens + paires de tokens, pour un
-contrôle thématique proche d'un vrai modèle). Vérifie que les questions
-topiques retrouvent bien les bons passages."""
+"""Test du pipeline RAG complet (ingestion → retrieval) SANS les services réels.
 
-import hashlib
+Fluree est remplacé par un stockage mémoire et Ollama par des embeddings
+déterministes (fixtures `conftest.py`). Vérifie que les questions topiques
+retrouvent bien les bons passages.
+"""
+
 import json
-import re
 from pathlib import Path
 
-import pytest
-
-from app import config, fluree, ingester, ollama_client as ollama, retriever
+from app import fluree, ingester, retriever
 
 ARTICLE = Path(__file__).resolve().parents[2] / "docs" / "article-tech-francaise.txt"
-
-_DIM = 512
-_STOP = frozenset(
-    "le la les de des du et en un une pour avec est sont au aux qui que se sa son ses \
-ce cette il elle ils elles dans par sur plus comme".split()
-)
-
-
-def _hash_idx(prefix: str, token: str) -> int:
-    return int(hashlib.md5((prefix + token).encode()).hexdigest()[:8], 16) % _DIM
-
-
-def _fake_embed(text: str) -> list[float]:
-    vec = [0.0] * _DIM
-    t = text.lower()
-    # n-grammes de caractères : thème approximatif
-    for i in range(len(t) - 2):
-        vec[_hash_idx("", t[i : i + 3])] += 1.0
-    # tokens (entités, vocabulaire thématique)
-    tokens = [
-        tok
-        for tok in re.findall(r"[a-zà-ÿ0-9]+", t)
-        if tok not in _STOP and len(tok) >= 3
-    ]
-    for tok in tokens:
-        vec[_hash_idx("t", tok)] += 4.0
-    # paires de tokens consécutifs : expressions-clés ("calcul quantique", …)
-    for a, b in zip(tokens, tokens[1:]):
-        vec[_hash_idx("p", f"{a} {b}")] += 3.0
-    return vec
-
-
-def _fake_embed_batch(texts: list[str]) -> list[list[float]]:
-    return [_fake_embed(t) for t in texts]
-
-
-class FakeFluree:
-    """Remplacement de app.fluree : garde les chunks en mémoire."""
-
-    def __init__(self):
-        self.rows: list[dict] = []
-
-    def ensure_ledger(self) -> str:
-        return "rag/smoke"
-
-    def insert_chunks(self, chunks: list[dict]) -> dict:
-        for c in chunks:
-            self.rows.append(
-                {
-                    "@id": f"rag:{c['chunk_id']}",
-                    "@type": "rag:Chunk",
-                    "rag:content": c["content"],
-                    "rag:embedding": c["embedding"],
-                    "rag:source": c["source"],
-                    "rag:chunkIndex": c["index"],
-                    "rag:obsolete": False,
-                }
-            )
-        return {"ok": True}
-
-    def mark_obsolete(self, source: str, keep_ids: set | None = None) -> dict:
-        # Même normalisation que fluree.mark_obsolete : les keep_ids sont des
-        # chunk_id nus alors que les lignes portent un @id préfixé.
-        keep = {fluree.chunk_local_id(value) for value in (keep_ids or set())}
-        for r in self.rows:
-            if (
-                r.get("rag:source") == source
-                and fluree.chunk_local_id(r.get("@id")) not in keep
-            ):
-                r["rag:obsolete"] = True
-        return {"ok": True}
-
-    def all_chunks(
-        self, source: str | None = None, entity: str | None = None
-    ) -> list[dict]:
-        rows = [r for r in self.rows if not r.get("rag:obsolete", False)]
-        if source:
-            rows = [r for r in rows if r.get("rag:source") == source]
-        if entity:
-            rows = [
-                r
-                for r in rows
-                if r.get("rag:mentions")
-                and any(m.get("ent:name") == entity for m in r.get("rag:mentions", []))
-            ]
-        return rows
-
-
-@pytest.fixture
-def fake_stack(monkeypatch):
-    store = FakeFluree()
-    monkeypatch.setattr(fluree, "ensure_ledger", store.ensure_ledger)
-    monkeypatch.setattr(fluree, "insert_chunks", store.insert_chunks)
-    monkeypatch.setattr(fluree, "all_chunks", store.all_chunks)
-    monkeypatch.setattr(fluree, "mark_obsolete", store.mark_obsolete)
-    monkeypatch.setattr(ollama, "embed_batch", _fake_embed_batch)
-    monkeypatch.setattr(ollama, "embed_one", lambda t: _fake_embed(t))
-    # Les embeddings simulés ont une échelle de similarité inférieure aux vrais
-    # (nomic-embed-text) : le seuil RETRIEVAL_MIN_SCORE est désactivé ici, sa
-    # logique étant testée à part (test_min_score_filters_low_similarity).
-    monkeypatch.setattr(config, "RETRIEVAL_MIN_SCORE", 0.0)
-    return store
 
 
 def _ingest_article(fake_stack) -> None:
@@ -158,12 +53,13 @@ def test_history_uses_fluree_log_endpoint(monkeypatch):
         def json(self):
             return {"ledger_id": "kb/main", "commits": [{"t": 1}], "count": 1}
 
-    def fake_get(url, params=None, timeout=30):
-        calls["url"] = url
-        calls["params"] = params
-        return FakeResponse()
+    class FakeClient:
+        def get(self, url, params=None, timeout=30):
+            calls["url"] = url
+            calls["params"] = params
+            return FakeResponse()
 
-    monkeypatch.setattr(fluree.httpx, "get", fake_get)
+    monkeypatch.setattr(fluree, "_client", lambda: FakeClient())
     assert fluree.history(limit=10) == [{"t": 1}]
     assert calls["url"].endswith("/log/kb/main")
     assert calls["params"] == {"limit": 10}
@@ -176,7 +72,7 @@ def test_mark_obsolete_keeps_new_chunk_ids(monkeypatch):
         {"@id": "https://ns.flurag.dev/keep-iri", "rag:source": "doc.md"},
         {"@id": "rag:ancien", "rag:source": "doc.md"},
     ]
-    monkeypatch.setattr(fluree, "all_chunks", lambda source=None, entity=None: rows)
+    monkeypatch.setattr(fluree, "all_chunks", lambda source=None: rows)
     sent = {}
 
     def fake_post(path, payload, timeout=60):
@@ -223,13 +119,14 @@ def test_retrieval_finds_agent_count(fake_stack):
 
 
 # ---------------------------------------------------------------------------
-# Test d'intégration : endpoint /api/search
+# Tests d'intégration des endpoints
 # ---------------------------------------------------------------------------
 
 
 def test_search_endpoint_empty_question():
     """L'endpoint /api/search rejette une question vide."""
     from fastapi.testclient import TestClient
+
     from app.main import app
 
     client = TestClient(app, raise_server_exceptions=False)
@@ -240,6 +137,7 @@ def test_search_endpoint_empty_question():
 def test_chat_without_hits_asks_the_llm(monkeypatch):
     """Sans extrait pertinent, la réponse vient du LLM, pas d'une phrase codée en dur."""
     from fastapi.testclient import TestClient
+
     from app.main import app
 
     monkeypatch.setattr("app.main.retriever.retrieve", lambda *a, **k: [])
@@ -265,6 +163,7 @@ def test_chat_without_hits_asks_the_llm(monkeypatch):
 def test_chat_sources_include_short_snippet(monkeypatch):
     """Les sources SSE exposent un extrait court, jamais le chunk complet."""
     from fastapi.testclient import TestClient
+
     from app.main import app
 
     content = "Le contenu pertinent. " + "x" * 300
@@ -300,6 +199,7 @@ def test_chat_sources_include_short_snippet(monkeypatch):
 def test_search_endpoint_returns_hits(monkeypatch):
     """L'endpoint /api/search retourne les chunks récupérés par le retriever."""
     from fastapi.testclient import TestClient
+
     from app.main import app
 
     fake_hits = [

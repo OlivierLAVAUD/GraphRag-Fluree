@@ -35,6 +35,7 @@
     <symbol id="i-paperclip" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21.4 11.6l-8.9 8.9a5 5 0 0 1-7.1-7.1l9.2-9.2a3.5 3.5 0 0 1 5 5l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5"/></symbol>
     <symbol id="i-send" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></symbol>
     <symbol id="i-shield" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.5-3 7.7-7 9-4-1.3-7-4.5-7-9V6l7-3Z"/><path d="m9 12 2 2 4-4"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2.5h8a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/></symbol>
     <symbol id="i-doc" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5Z"/><path d="M14 3v5h5"/></symbol>
     <symbol id="i-compare" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M8 4 4 8l4 4M4 8h11a3 3 0 0 1 3 3v1M16 20l4-4-4-4M20 16H9a3 3 0 0 1-3-3v-1"/></symbol>
     <symbol id="i-check-search" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.4-3.4M8 11l2 2 4-4"/></symbol>
@@ -264,12 +265,23 @@
           <h3>Ajouter des documents</h3>
           <p class="hint">Formats supportés : <code>.md</code>, <code>.txt</code>, <code>.pdf</code>. Les fichiers sont découpés en chunks, embeddés puis stockés dans Fluree.</p>
           <form id="uploadForm" class="upload-form">
-            <label class="upload-dropzone" for="libraryFiles">
-              <strong>Sélectionner des documents</strong>
-              <span class="hint">Markdown, texte ou PDF · sélection multiple</span>
+            <label class="upload-dropzone" for="libraryFiles" id="uploadDropzone">
+              <strong id="uploadTitle">Sélectionner des documents ou un dossier</strong>
+              <span class="hint" id="uploadHint">Markdown, texte ou PDF · sélection multiple, ou dossier complet</span>
             </label>
-            <input type="file" id="libraryFiles" name="files" accept=".md,.markdown,.txt,.pdf" multiple hidden>
-            <button type="submit" class="btn btn--primary" id="uploadBtn">Indexer les fichiers</button>
+            <input type="file" id="libraryFiles" accept=".md,.markdown,.txt,.pdf" multiple hidden>
+            <input type="file" id="libraryDir" webkitdirectory directory multiple hidden>
+            <div class="upload-actions">
+              <button type="button" class="btn" id="pickDirBtn">
+                <svg class="icon icon--sm"><use href="#i-folder"/></svg>
+                Choisir un dossier
+              </button>
+              <button type="submit" class="btn btn--primary" id="uploadBtn">Indexer</button>
+            </div>
+            <div class="upload-progress" id="uploadProgress" hidden>
+              <div class="upload-progress__track"><span class="upload-progress__fill" id="uploadFill"></span></div>
+              <p class="upload-progress__label" id="uploadProgressLabel"></p>
+            </div>
           </form>
           <div id="ingestResult" class="result"></div>
 
@@ -281,6 +293,14 @@
           <h3>Depuis le terminal</h3>
           <p class="hint">Placez vos fichiers dans le dossier <code>docs/</code> puis :</p>
           <pre>docker compose exec backend python ingest.py docs/</pre>
+
+          <div class="danger-zone">
+            <div>
+              <strong>Réinitialiser la base</strong>
+              <p class="hint">Désindexe tous les documents. Le ledger Fluree et son historique sont conservés.</p>
+            </div>
+            <button type="button" class="btn btn--danger" id="resetKb">Réinitialiser</button>
+          </div>
         </section>
 
         <section class="kb-view modal-view" id="kbSearch" hidden>

@@ -35,7 +35,10 @@ services:
       - ollama-models:/root/.ollama
     environment:
       OLLAMA_HOST: "http://ollama:11434"
-    entrypoint: ["/bin/sh", "-c", "ollama pull llama3.2:3b && ollama pull nomic-embed-text"]
+    entrypoint:
+      - "/bin/sh"
+      - "-c"
+      - "ollama pull ${CHAT_MODEL:-llama3.2:3b} && ollama pull ${EMBED_MODEL:-nomic-embed-text}"
     restart: "no"
 
   fluree:
@@ -69,11 +72,27 @@ services:
     environment:
       OLLAMA_URL: http://ollama:11434
       FLUREE_URL: http://fluree:8090
-      FLUREE_LEDGER: kb/main
-      EMBED_MODEL: nomic-embed-text
-      CHAT_MODEL: llama3.2:3b
-      TOP_K: "7"
-      RETRIEVAL_MIN_SCORE: "0.3"
+      # Toutes les valeurs sont surchargeables via un fichier `.env`
+      # (voir `.env.example`) : plus besoin d'éditer ce fichier.
+      FLUREE_LEDGER: ${FLUREE_LEDGER:-kb/main}
+      EMBED_MODEL: ${EMBED_MODEL:-nomic-embed-text}
+      CHAT_MODEL: ${CHAT_MODEL:-llama3.2:3b}
+      TOP_K: ${TOP_K:-7}
+      RETRIEVAL_MIN_SCORE: ${RETRIEVAL_MIN_SCORE:-0.3}
+      CHUNK_SIZE: ${CHUNK_SIZE:-500}
+      CHUNK_OVERLAP: ${CHUNK_OVERLAP:-80}
+      # Si API_TOKEN est défini, les endpoints d'écriture/chat exigent
+      # `X-API-Token` ou `Authorization: Bearer`.
+      API_TOKEN: ${API_TOKEN:-}
+      MAX_CONCURRENT_CHATS: ${MAX_CONCURRENT_CHATS:-2}
+      MAX_UPLOAD_SIZE: ${MAX_UPLOAD_SIZE:-52428800}
+      MAX_TOTAL_UPLOAD_SIZE: ${MAX_TOTAL_UPLOAD_SIZE:-209715200}
+      MAX_UPLOAD_FILES: ${MAX_UPLOAD_FILES:-20}
+      MAX_QUESTION_LENGTH: ${MAX_QUESTION_LENGTH:-4000}
+      MAX_TOP_K: ${MAX_TOP_K:-50}
+      INDEX_CACHE_DIR: ${INDEX_CACHE_DIR:-/tmp/graphrag-index-cache}
+      INDEX_CACHE_MAX_MB: ${INDEX_CACHE_MAX_MB:-256}
+      INDEX_CACHE_MAX_ENTRIES: ${INDEX_CACHE_MAX_ENTRIES:-32}
     depends_on:
       fluree:
         condition: service_healthy

@@ -1,0 +1,86 @@
+{
+  "source_doc": "docs/article-tech-francaise.txt",
+  "description": "Évaluation du RAG — 10 questions pièges : multi-hop, bridge, pièges temporels, précision, négation, entité confondante, hallucination. Les réponses marquées expected_absence=true nécessitent une information qui n'est PAS dans le texte fourni : un bon RAG doit alors refuser de répondre (le LLM ne doit pas inventer).",
+  "questions": [
+    {
+      "id": 1,
+      "category": "multi-hop",
+      "question": "Quel modèle de Mistral AI est intégré à Copilot Studio, et via quel accord ?",
+      "expected": "Mistral Medium 3.5, via le partenariat avec Microsoft annoncé en juillet 2026.",
+      "expected_absence": false,
+      "mechanism": "Relier : Mistral Medium 3.5 intégré à Copilot Studio (1) -> partenariat avec Microsoft (2) -> annoncé en juillet 2026 (3)."
+    },
+    {
+      "id": 2,
+      "category": "bridge",
+      "question": "Est-ce que l'État français a confiance dans les solutions de Mistral AI pour des usages sensibles ?",
+      "expected": "Oui, car il généralise son assistant conversationnel à toute la fonction publique après une phase de test.",
+      "expected_absence": false,
+      "mechanism": "Inférence non dite explicitement : déploiement auprès d'un million de fonctionnaires après une expérimentation auprès de 10 000 agents."
+    },
+    {
+      "id": 3,
+      "category": "temporel",
+      "question": "Quel événement s'est produit en premier : le déploiement de l'assistant Mistral pour la fonction publique, ou l'inauguration de l'ordinateur quantique Lucy ?",
+      "expected": "L'inauguration de Lucy (avril 2026) est antérieure au déploiement de l'assistant Mistral (juin 2026).",
+      "expected_absence": false,
+      "mechanism": "Lucy inaugurée le 14 avril 2026 ; l'assistant Mistral a été annoncé en juin 2026."
+    },
+    {
+      "id": 4,
+      "category": "precision",
+      "question": "Combien d'agents de l'État vont bénéficier de l'assistant IA, et quel en est le coût ?",
+      "expected": "Environ un million d'agents, pour un coût évalué entre 700 000 et 750 000 euros.",
+      "expected_absence": false,
+      "mechanism": "Piège numérique : Le Figaro donne 700 000 euros, ChannelNews 750 000 euros. Le texte de référence ne contient que 700 000 euros : une réponse honnête cite la source utilisée ou signale la divergence."
+    },
+    {
+      "id": 5,
+      "category": "set",
+      "question": "Quelles sont les deux entreprises françaises mentionnées qui fournissent des solutions de calcul quantique ?",
+      "expected": "Quandela et Alice & Bob.",
+      "expected_absence": false,
+      "mechanism": "Intersection d'acteurs : Quandela (développe Lucy) et Alice & Bob (contrat GENCI). Le CEA est un opérateur, pas un fournisseur."
+    },
+    {
+      "id": 6,
+      "category": "negation",
+      "question": "Le partenariat Microsoft-Mistral a-t-il pour conséquence une prise de participation de Microsoft dans Mistral ?",
+      "expected": "Non, l'accord annoncé en juillet 2026 ne s'accompagne d'aucune nouvelle prise de participation de Microsoft dans Mistral (précision de Brad Smith, rapportée par La Tribune).",
+      "expected_absence": false,
+      "mechanism": "Piège de négation. Désormais couvert par la source complémentaire La Tribune (docs/source-la-tribune.md) : « Brad Smith a précisé que l'accord ne s'accompagnait d'aucune nouvelle prise de participation ». Le texte principal ne mentionne, lui, que l'investissement dans les infrastructures."
+    },
+    {
+      "id": 7,
+      "category": "entite-confondante",
+      "question": "Est-ce que la solution de Palantir, Gotham, a été immédiatement remplacée par celle de ChapsVision ?",
+      "expected": "Non, la transition est progressive et le contrat avec Palantir reste en vigueur.",
+      "expected_absence": false,
+      "mechanism": "Le texte dit « remplacer progressivement » ; la notion de contrat renouvelé fin 2025 encore en vigueur provient d'une source annexe non fournie."
+    },
+    {
+      "id": 8,
+      "category": "bridge",
+      "question": "Quel est le principal intérêt de Microsoft dans son partenariat avec Mistral ?",
+      "expected": "Accéder à des capacités de calcul en Europe et se repositionner face aux préoccupations de souveraineté.",
+      "expected_absence": false,
+      "mechanism": "Raisonnement stratégique : le texte indique que les clients Azure développent sur les serveurs européens de Mistral ; l'intention précise vient de La Tribune/Politique Matin (sources annexes)."
+    },
+    {
+      "id": 9,
+      "category": "temporel-inverse",
+      "question": "Mistral AI a-t-elle été créée après la première levée de fonds de Neverhack ?",
+      "expected": "Non, Mistral a été créée en 2023, bien avant la levée de fonds de Neverhack en juin 2026.",
+      "expected_absence": false,
+      "mechanism": "Piège de cohérence : fonder l'entreprise (2023) avant la levée de fonds de Neverhack (11 M€, juin 2026). La prémisse « créée après » est fausse."
+    },
+    {
+      "id": 10,
+      "category": "hallucination",
+      "question": "Quel a été l'impact du déploiement de Mistral dans la fonction publique sur les effectifs du ministère de l'Intérieur ?",
+      "expected": "Je ne dispose pas de cette information dans ma base de connaissances.",
+      "expected_absence": true,
+      "mechanism": "Leurre : aucune donnée sur les effectifs ou réductions de postes dans le contexte. Le RAG doit refuser de répondre, pas inventer."
+    }
+  ]
+}

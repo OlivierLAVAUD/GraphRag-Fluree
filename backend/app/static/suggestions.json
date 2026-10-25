@@ -2,33 +2,160 @@
   "heading": "Comment puis-je vous aider ?",
   "subtitle": "Interrogez votre base de connaissances. Les réponses sont générées localement et citent toujours leurs sources.",
   "columns": 2,
+  "rotation": {
+    "enabled": true,
+    "visibleCount": 4,
+    "strategy": "priority"
+  },
   "suggestions": [
     {
-      "title": "Interroger la base",
-      "description": "Quelles entreprises fournissent des solutions de calcul quantique ?",
-      "prompt": "Quelles entreprises françaises fournissent des solutions de calcul quantique ?",
+      "id": "explore-topic",
+      "category": "exploration",
+      "priority": 1,
+      "title": "Explorer un sujet",
+      "description": "Identifiez les entités et concepts clés liés à un thème.",
+      "prompt": "Quelles sont les principales entités et relations associées à ce sujet dans la base de connaissances ?",
       "icon": "check-search",
       "enabled": true
     },
     {
+      "id": "summarize-doc",
+      "category": "synthese",
+      "priority": 2,
       "title": "Résumer un document",
-      "description": "Résume les points clés du rapport France 2030.",
-      "prompt": "Résume les points clés du rapport France 2030.",
+      "description": "Obtenez une synthèse structurée avec les points clés.",
+      "prompt": "Résume les points clés du document sélectionné en citant les passages sources.",
       "icon": "doc",
       "enabled": true
     },
     {
+      "id": "compare-sources",
+      "category": "verification",
+      "priority": 3,
       "title": "Comparer des sources",
-      "description": "Compare les informations de La Tribune et du Figaro.",
-      "prompt": "Compare les informations de La Tribune et du Figaro sur le partenariat Microsoft-Mistral.",
+      "description": "Croisez plusieurs documents sur un même sujet.",
+      "prompt": "Compare les informations fournies par les différentes sources disponibles sur ce sujet.",
       "icon": "compare",
       "enabled": true
     },
     {
+      "id": "verify-claim",
+      "category": "verification",
+      "priority": 4,
       "title": "Vérifier une affirmation",
-      "description": "Le partenariat implique-t-il une prise de participation ?",
-      "prompt": "Le partenariat Microsoft-Mistral implique-t-il une prise de participation ?",
+      "description": "Contrôlez une information et retrouvez sa source primaire.",
+      "prompt": "Cette affirmation est-elle confirmée par les sources de la base ? Cite les documents pertinents.",
       "icon": "shield",
+      "enabled": true
+    },
+    {
+      "id": "map-topic",
+      "category": "graphe",
+      "priority": 5,
+      "title": "Cartographier un thème",
+      "description": "Visualisez les entités et relations autour d'un sujet.",
+      "prompt": "Quelles entités sont connectées à ce sujet et comment sont-elles reliées entre elles ?",
+      "icon": "network",
+      "enabled": true
+    },
+    {
+      "id": "find-link",
+      "category": "graphe",
+      "priority": 6,
+      "title": "Trouver un lien",
+      "description": "Découvrez comment deux entités sont reliées dans le graphe.",
+      "prompt": "Quel est le chemin le plus court entre ces deux entités dans la base de connaissances ?",
+      "icon": "link",
+      "enabled": true
+    },
+    {
+      "id": "central-entities",
+      "category": "graphe",
+      "priority": 7,
+      "title": "Entités centrales",
+      "description": "Identifiez les nœuds les plus connectés de la base.",
+      "prompt": "Quelles sont les entités les plus fortement connectées dans la base de connaissances ?",
+      "icon": "dashboard",
+      "enabled": true
+    },
+    {
+      "id": "extract-figures",
+      "category": "synthese",
+      "priority": 8,
+      "title": "Extraire les chiffres clés",
+      "description": "Retrouvez les données quantitatives avec leurs sources.",
+      "prompt": "Quelles sont les données chiffrées présentes dans les documents sur ce sujet, et d'où proviennent-elles ?",
+      "icon": "chart",
+      "enabled": true
+    },
+    {
+      "id": "timeline",
+      "category": "synthese",
+      "priority": 9,
+      "title": "Reconstituer une chronologie",
+      "description": "Ordonnez les événements liés à un sujet.",
+      "prompt": "Retrace la chronologie des événements documentés sur ce sujet, avec les dates et sources associées.",
+      "icon": "timeline",
+      "enabled": true
+    },
+    {
+      "id": "multi-doc-summary",
+      "category": "synthese",
+      "priority": 10,
+      "title": "Synthèse multi-documents",
+      "description": "Agrégez plusieurs documents en une vue d'ensemble.",
+      "prompt": "Produis une synthèse consolidée des documents disponibles sur ce sujet, en citant chaque source.",
+      "icon": "doc",
+      "enabled": true
+    },
+    {
+      "id": "detect-contradictions",
+      "category": "verification",
+      "priority": 11,
+      "title": "Détecter les contradictions",
+      "description": "Repérez les informations divergentes entre sources.",
+      "prompt": "Existe-t-il des informations contradictoires entre les sources sur ce sujet ? Lesquelles ?",
+      "icon": "alert",
+      "enabled": true
+    },
+    {
+      "id": "primary-source",
+      "category": "verification",
+      "priority": 12,
+      "title": "Retrouver la source primaire",
+      "description": "Remontez à l'origine d'une affirmation.",
+      "prompt": "Quelle est la source primaire de cette information dans la base de connaissances ?",
+      "icon": "shield",
+      "enabled": true
+    },
+    {
+      "id": "identify-gaps",
+      "category": "exploration",
+      "priority": 13,
+      "title": "Identifier les lacunes",
+      "description": "Repérez ce qui n'est pas (ou mal) couvert.",
+      "prompt": "Quelles informations manquent ou sont insuffisamment documentées sur ce sujet dans la base ?",
+      "icon": "help",
+      "enabled": true
+    },
+    {
+      "id": "what-can-i-ask",
+      "category": "guidage",
+      "priority": 14,
+      "title": "Que puis-je demander ?",
+      "description": "Découvrez les capacités du chatbot et le périmètre de la base.",
+      "prompt": "Quels types de questions puis-je poser et quels sujets sont couverts par la base de connaissances ?",
+      "icon": "help",
+      "enabled": true
+    },
+    {
+      "id": "top-topics",
+      "category": "guidage",
+      "priority": 15,
+      "title": "Sujets les plus documentés",
+      "description": "Obtenez une vue d'ensemble du contenu disponible.",
+      "prompt": "Quels sont les sujets les plus documentés dans la base de connaissances ?",
+      "icon": "dashboard",
       "enabled": true
     }
   ]

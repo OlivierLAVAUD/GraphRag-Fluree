@@ -48,8 +48,13 @@ INDEX_CACHE_DIR = os.environ.get(
     "INDEX_CACHE_DIR",
     os.path.join(tempfile.gettempdir(), "graphrag-index-cache"),
 )
-# Nombre maximal d'index (source, entity) conservés en mémoire/disque.
+# Nombre maximal de fichiers d'index conservés sur disque (un par version).
 INDEX_CACHE_MAX_ENTRIES = int(os.environ.get("INDEX_CACHE_MAX_ENTRIES", "32"))
+# Budget mémoire du cache d'index (matrice + métadonnées). Au-delà, l'index
+# n'est pas gardé en mémoire : la recherche reste correcte mais reconstruit
+# la matrice à chaque requête plutôt que de faire grossir le processus.
+# 0 désactive complètement le cache mémoire (le cache disque reste actif).
+INDEX_CACHE_MAX_MB = int(os.environ.get("INDEX_CACHE_MAX_MB", "256"))
 
 # -- Limites d'upload ---------------------------------------------------------
 MAX_UPLOAD_SIZE = int(

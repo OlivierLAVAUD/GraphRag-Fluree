@@ -1,6 +1,8 @@
-fastapi>=0.115
-uvicorn[standard]>=0.30
-httpx>=0.27
-numpy>=1.26
-pypdf>=4.0
-python-multipart>=0.0.9
+# Versions épinglées : un build doit être reproductible (et la CI doit tester
+# exactement ce que l'image embarque). Mettre à jour ici, pas dans le Dockerfile.
+fastapi==0.141.1
+uvicorn[standard]==0.52.4
+httpx==0.28.1
+numpy==2.5.2
+pypdf==6.16.2
+python-multipart==0.0.32

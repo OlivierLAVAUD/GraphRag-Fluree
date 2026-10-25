@@ -159,6 +159,35 @@ def ingest_text(text: str, source: str) -> list[dict]:
     return chunks
 
 
+def deindex_source(source: str) -> int:
+    """Désindexe une source : ses chunks ne sont plus renvoyés par la recherche.
+
+    Les chunks sont marqués obsolètes (le ledger reste immuable et l'historique
+    conservé) et l'index de recherche est invalidé. Renvoie le nombre de chunks
+    désindexés, 0 si la source n'existe pas.
+    """
+    removed = fluree.deindex_source(source)
+    if removed:
+        from . import retriever as _retriever
+
+        _retriever.invalidate_index()
+        log.info("Source désindexée : %s (%d chunks)", source, removed)
+    return removed
+
+
+def reset_knowledge_base() -> int:
+    """Vide la base de connaissances sans détruire le ledger (audit conservé).
+
+    Renvoie le nombre de chunks désindexés.
+    """
+    removed = fluree.deindex_all()
+    from . import retriever as _retriever
+
+    _retriever.invalidate_index()
+    log.info("Base réinitialisée : %d chunks désindexés", removed)
+    return removed
+
+
 def source_for_path(path: Path) -> str:
     """Identifie un fichier par un chemin relatif stable, pas seulement son nom.
 
@@ -171,6 +200,72 @@ def source_for_path(path: Path) -> str:
         return path.resolve().relative_to(Path.cwd().resolve()).as_posix()
     except ValueError:
         return path.name
+
+
+def resolve_source(name: str) -> str:
+    """Nom de source stable pour un upload (fichier sans chemin).
+
+    La CLI identifie une source par son chemin relatif (`docs/faq.md`) alors
+    qu'un upload ne fournit qu'un nom de fichier (`faq.md`) : sans
+    réconciliation, le même document serait indexé deux fois (deux sources
+    actives, donc deux jeux de chunks). On réutilise donc la source existante
+    de même nom de fichier, en préférant le chemin le plus court (le plus
+    stable d'une machine à l'autre).
+    """
+    try:
+        existing = fluree.source_names()
+    except Exception as exc:  # noqa: BLE001 - best effort : le nom suffit
+        log.warning("Sources existantes indisponibles (%s) : source = %s", exc, name)
+        return name
+    matches = [src for src in existing if Path(src).name == Path(name).name]
+    if not matches:
+        return name
+    # La CLI est la forme canonique (`docs/faq.md`) : si les deux formes
+    # coexistent, l'upload rejoint la source qui porte un chemin. Plusieurs
+    # chemins homonymes (`a/faq.md`, `docs/faq.md`) restent des documents
+    # distincts : on retient le chemin le plus court, le plus stable.
+    with_dir = [src for src in matches if Path(src).parent != Path(".")]
+    return min(with_dir or matches, key=len)
+
+
+# Longueur maximale d'une source construite depuis un upload : un chemin
+# démesuré n'apporte rien et gonfle chaque chunk stocké dans le graphe.
+_MAX_SOURCE_LENGTH = 400
+
+
+def _clean_source_path(name: str) -> str:
+    """Normalise un nom d'upload en chemin relatif (`/`), sans segments vides.
+
+    Le navigateur envoie le chemin relatif d'un dossier sélectionné
+    (`mon-dossier/sous/fichier.md`). Les segments `.` et `..` sont retirés : la
+    source est une chaîne stockée dans le graphe, pas un chemin sur disque, mais
+    on évite d'y propager une remontée de répertoire.
+    """
+    parts = [
+        part
+        for part in (name or "").replace("\\", "/").split("/")
+        if part and part not in (".", "..")
+    ]
+    return "/".join(parts)
+
+
+def resolve_upload_source(name: str) -> str:
+    """Source d'un upload : conserve le chemin relatif quand il est fourni.
+
+    Un dossier sélectionné envoie `dossier/sous/fichier.md` : le chemin doit
+    rester la source, sinon deux fichiers homonymes de dossiers différents
+    s'écraseraient mutuellement (le dernier ingéré marquerait les chunks de
+    l'autre obsolètes). Un simple nom de fichier reste réconcilié avec les
+    sources existantes (voir `resolve_source`).
+    """
+    path = _clean_source_path(name)
+    if not path:
+        return "fichier"
+    if len(path) > _MAX_SOURCE_LENGTH:
+        path = path.rsplit("/", 1)[-1][:_MAX_SOURCE_LENGTH]
+    if "/" in path:
+        return path
+    return resolve_source(path)
 
 
 def ingest_path(path: Path) -> list[tuple[str, int]]:

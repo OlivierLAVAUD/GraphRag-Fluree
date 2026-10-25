@@ -57,6 +57,47 @@ def _coerce_embedding(value):
     return value
 
 
+def _ent_display_name(mention: dict) -> str:
+    """Nom d'une entité mentionnée, ou à défaut son slug lisible.
+
+    Fluree renvoie normalement `ent:name`, mais peut ne renvoyer que la
+    référence `ent:<slug>` : on retombe alors sur le slug (« alice bob ») pour
+    que la recherche par entité continue de fonctionner.
+    """
+    name = mention.get("ent:name") or mention.get(f"{config.ENT_NS}name")
+    if name:
+        return str(name).strip().lower()
+    ent_id = mention.get("@id")
+    if not isinstance(ent_id, str):
+        return ""
+    for prefix in (config.ENT_NS, "ent:"):
+        if ent_id.startswith(prefix):
+            ent_id = ent_id[len(prefix) :]
+            break
+    return ent_id.replace("_", " ").replace("-", " ").strip().lower()
+
+
+def _entity_names(row: dict) -> list[str]:
+    """Entités mentionnées par un chunk, telles que persistées dans le graphe.
+
+    L'index lit `rag:mentions` au lieu de relancer l'extracteur sur le texte de
+    chaque candidat à chaque requête : le graphe reste la source de vérité (une
+    amélioration de l'extracteur n'entre plus en contradiction silencieuse avec
+    les chunks déjà indexés) et le coût par requête devient négligeable.
+    """
+    mentions = _get(row, "mentions") or []
+    if isinstance(mentions, dict):
+        mentions = [mentions]
+    names: list[str] = []
+    for mention in mentions if isinstance(mentions, list) else []:
+        if not isinstance(mention, dict):
+            continue
+        name = _ent_display_name(mention)
+        if name and name not in names:
+            names.append(name)
+    return names
+
+
 def _build_index(rows: list[dict]) -> tuple[np.ndarray, list[dict]]:
     """Construit une matrice d'embeddings L2-normalisée et les métadonnées.
 
@@ -94,6 +135,7 @@ def _build_index(rows: list[dict]) -> tuple[np.ndarray, list[dict]]:
                 "content": _get(row, "content") or "",
                 "source": _get(row, "source"),
                 "index": _get(row, "chunkIndex"),
+                "entities": _entity_names(row),
             }
         )
     if not vectors:
@@ -189,8 +231,14 @@ def score_rows(
 # ---------------------------------------------------------------------------
 # Cache de l'index local (matrice d'embeddings + métadonnées)
 # ---------------------------------------------------------------------------
-# Clé : tuple (source, entity) pour différencier les index filtrés.
-# Valeur : (version du marqueur partagé, matrice, métadonnées).
+# Un seul index par ledger : les filtres (source, entité) sont appliqués sur
+# les métadonnées au moment de la requête, et non plus en indexant le corpus
+# une fois par combinaison de filtres.
+_INDEX_KEY: tuple[str | None, str | None] = (None, None)
+# Version du format des métadonnées : l'incrémenter invalide les caches disque
+# écrits par une version antérieure du code.
+_CACHE_FORMAT = "v2"
+
 _index_cache: dict[
     tuple[str | None, str | None], tuple[str, np.ndarray, list[dict]]
 ] = {}
@@ -233,10 +281,15 @@ def invalidate_index() -> None:
 
 
 def _cache_stem(key: tuple[str | None, str | None], version: str) -> str:
-    """Chemin de base du cache disque pour un index (ledger, filtres, version)."""
-    raw = "\0".join((config.LEDGER, key[0] or "", key[1] or "", version))
+    """Chemin de base du cache disque pour un index (ledger, format, version)."""
+    raw = "\0".join((config.LEDGER, _CACHE_FORMAT, key[0] or "", key[1] or "", version))
     digest = hashlib.sha1(raw.encode("utf-8")).hexdigest()
     return os.path.join(config.INDEX_CACHE_DIR, digest)
+
+
+def _entry_bytes(matrix: np.ndarray, metas: list[dict]) -> int:
+    """Taille approximative d'un index en mémoire (matrice + métadonnées)."""
+    return int(matrix.nbytes) + len(json.dumps(metas, ensure_ascii=False).encode())
 
 
 def _load_disk_index(
@@ -253,6 +306,7 @@ def _load_disk_index(
             not isinstance(metas, list)
             or matrix.ndim != 2
             or matrix.shape[0] != len(metas)
+            or not all(isinstance(meta, dict) for meta in metas)
         ):
             return None
         return matrix.astype(np.float32, copy=False), metas
@@ -266,14 +320,16 @@ def _prune_disk_cache() -> None:
         names = os.listdir(config.INDEX_CACHE_DIR)
     except OSError:
         return
-    stems = sorted({os.path.splitext(name)[0] for name in names})
-    stems.sort(
-        key=lambda stem: (
-            os.path.getmtime(os.path.join(config.INDEX_CACHE_DIR, stem + ".npz"))
-            if os.path.exists(os.path.join(config.INDEX_CACHE_DIR, stem + ".npz"))
-            else 0
-        ),
-        reverse=True,
+
+    def mtime(stem: str) -> float:
+        path = os.path.join(config.INDEX_CACHE_DIR, stem + ".npz")
+        try:
+            return os.path.getmtime(path)
+        except OSError:
+            return 0.0
+
+    stems = sorted(
+        {os.path.splitext(name)[0] for name in names}, key=mtime, reverse=True
     )
     for stem in stems[config.INDEX_CACHE_MAX_ENTRIES :]:
         for ext in (".npz", ".json"):
@@ -317,55 +373,102 @@ def _store_memory_index(
     matrix: np.ndarray,
     metas: list[dict],
 ) -> None:
-    """Stocke l'index en mémoire en bornant le nombre d'entrées."""
+    """Garde l'index en mémoire si son empreinte respecte le budget configuré.
+
+    Il n'y a qu'un index par ledger : le budget `INDEX_CACHE_MAX_MB` sert de
+    garde-fou mémoire (un ledger de plusieurs centaines de milliers de chunks
+    ne doit pas faire enfler le processus sans limite). Au-delà, l'index n'est
+    pas conservé : chaque requête le reconstruit.
+    """
+    size = _entry_bytes(matrix, metas)
+    budget = config.INDEX_CACHE_MAX_MB * 1024 * 1024
     with _index_lock:
+        _index_cache.clear()
+        if size > budget:
+            log.warning(
+                "Index de %.1f Mo au-delà du budget INDEX_CACHE_MAX_MB=%d : "
+                "non conservé en mémoire (reconstruction à chaque requête).",
+                size / (1024 * 1024),
+                config.INDEX_CACHE_MAX_MB,
+            )
+            return
         _index_cache[key] = (version, matrix, metas)
-        while len(_index_cache) > config.INDEX_CACHE_MAX_ENTRIES:
-            _index_cache.pop(next(iter(_index_cache)))
 
 
 def build_index(
     rows: list[dict],
-    source: str | None = None,
-    entity: str | None = None,
     version: str | None = None,
 ) -> tuple[np.ndarray, list[dict]]:
     """Construit (ou réutilise depuis le cache) la matrice d'embeddings.
 
-    Le cache est indexé par (source, entity) pour éviter les collisions et
-    invalidé dès que le marqueur partagé change. *version* permet à l'appelant
-    de fournir la version lue avant la récupération des chunks (évite de mettre
-    en cache des données lues avant une ingestion concurrente).
+    L'index est unique pour le ledger : les filtres de recherche sont appliqués
+    ensuite sur les métadonnées (`retrieve`). *version* permet à l'appelant de
+    fournir la version lue avant la récupération des chunks (évite de mettre en
+    cache des données lues avant une ingestion concurrente).
 
     La construction se fait **hors du verrou** : une reconstruction après
     ingestion ne bloque pas les requêtes concurrentes qui utilisent un index
     déjà en cache.
     """
-    key = (source, entity)
     if version is None:
         version = _index_version()
-    with _index_lock:
-        cached = _index_cache.get(key)
-        if cached is not None and cached[0] == version:
-            return cached[1], cached[2]
     matrix, metas = _build_index(rows)
     # Si une ingestion a eu lieu pendant la construction, on ne met pas en
     # cache un index déjà périmé.
     if _index_version() == version:
-        _store_memory_index(key, version, matrix, metas)
-        _save_disk_index(key, version, matrix, metas)
+        _store_memory_index(_INDEX_KEY, version, matrix, metas)
+        _save_disk_index(_INDEX_KEY, version, matrix, metas)
     return matrix, metas
 
 
-def _extract_entity_names(text: str) -> list[str]:
-    """Extrait les noms d'entités d'un texte (réutilise le module entities)."""
-    try:
-        from . import entities
+def _full_index() -> tuple[np.ndarray, list[dict]]:
+    """Index complet du ledger : cache mémoire, puis cache disque, puis Fluree."""
+    version = _index_version()
+    with _index_lock:
+        cached = _index_cache.get(_INDEX_KEY)
+        if cached is not None and cached[0] == version:
+            return cached[1], cached[2]
+    disk = _load_disk_index(_INDEX_KEY, version)
+    if disk is not None:
+        matrix, metas = disk
+        _store_memory_index(_INDEX_KEY, version, matrix, metas)
+        return matrix, metas
+    rows = fluree.all_chunks()
+    if not rows:
+        return np.zeros((0, 0), dtype=np.float32), []
+    return build_index(rows, version=version)
 
-        ents = entities.extract_entities(text)
-        return [e["name"] for e in ents]
-    except Exception:  # noqa: BLE001
-        return []
+
+def _matches_filter(meta: dict, source: str | None, entity: str | None) -> bool:
+    """Vrai si le chunk satisfait les filtres de recherche."""
+    if source and meta.get("source") != source:
+        return False
+    if entity:
+        wanted = entity.strip().lower()
+        if not any(name == wanted for name in meta.get("entities") or ()):
+            return False
+    return True
+
+
+def _apply_entity_bonus(hits: list[dict], metas: list[dict], question: str) -> None:
+    """Ajoute un bonus aux chunks dont une entité du graphe est citée.
+
+    Les entités viennent des `rag:mentions` persistées à l'ingestion (voir
+    `_entity_names`) : plus aucune extraction n'est refaite à la requête, et le
+    graphe reste la seule source de vérité. Le bonus total est borné pour ne
+    pas dépasser l'échelle du cosinus.
+    """
+    question_lower = question.lower()
+    entities_by_content = {
+        meta.get("content") or "": meta.get("entities") or [] for meta in metas
+    }
+    for hit in hits:
+        bonus = 0.0
+        for ent_name in entities_by_content.get(hit.get("content") or "", ()):
+            if ent_name and ent_name in question_lower:
+                bonus += 0.1
+        if bonus > 0:
+            hit["score"] = round(min(1.0, hit["score"] + min(bonus, 0.3)), 4)
 
 
 def retrieve(
@@ -376,83 +479,60 @@ def retrieve(
     source: str | None = None,
     entity: str | None = None,
 ) -> list[dict]:
-    """Pipeline complet : embed de la question, récupération des chunks,
-    filtrage par seuil puis top_k.
+    """Pipeline complet : embed de la question, filtrage, scoring puis top_k.
 
-    Si *matrix* est fourni, la recherche s'effectue sur la matrice pré-formatée
-    (index local) plutôt que sur une récupération ligne à ligne. Cela permet de
-    préparer l'extension vers la recherche vectorielle native de Fluree sans
-    changer l'API.
+    L'index est construit une seule fois pour le ledger (cache mémoire borné par
+    `INDEX_CACHE_MAX_MB`, puis cache disque, puis Fluree) et réutilisé pour tous
+    les filtres : *source* et *entity* ne déclenchent plus un index dédié, ils
+    restreignent simplement les métadonnées avant le scoring.
 
-    Le paramètre *metas* doit être la liste des métadonnées (content, source,
-    index) correspondantes à la matrice. Si None, le calcul est fait ligne par
-    ligne avec les rows retournées par fluree.all_chunks().
-
-    L'index est construit à la volée s'il n'est pas déjà en cache. Le cache est
-    indexé par couple (source, entity) et invalidé à chaque ingestion, y compris
+    Si *matrix* / *metas* sont fournis (tests, pré-calcul), ils remplacent
+    l'index automatique. Le cache est invalidé à chaque ingestion, y compris
     depuis un autre processus (CLI `ingest.py`) via un marqueur partagé ; les
     tests peuvent monkeypatcher fluree.all_chunks.
     """
     top_k = max(1, min(int(top_k or config.TOP_K), config.MAX_TOP_K))
-    key = (source, entity)
-    version = _index_version()
-    with _index_lock:
-        cached = _index_cache.get(key)
-    if cached is not None and cached[0] == version:
-        _, matrix, metas = cached
-        rows = []  # Pas besoin de recharger les rows
-    else:
-        disk = _load_disk_index(key, version)
-        if disk is not None:
-            matrix, metas = disk
-            _store_memory_index(key, version, matrix, metas)
-            rows = []
-        else:
-            rows = fluree.all_chunks(source=source, entity=entity)
-            if not rows:
-                return []
-            matrix, metas = build_index(
-                rows, source=source, entity=entity, version=version
-            )
+    if matrix is None or metas is None:
+        matrix, metas = _full_index()
+    if matrix is None or matrix.shape[0] == 0 or not metas:
+        return []
+
+    candidates = matrix.shape[0]
+    if source or entity:
+        keep = [
+            i for i, meta in enumerate(metas) if _matches_filter(meta, source, entity)
+        ]
+        if not keep:
+            log.info("Retrieval : aucun chunk pour source=%r entity=%r", source, entity)
+            return []
+        matrix = matrix[keep]
+        metas = [metas[i] for i in keep]
 
     query_embedding = ollama.embed_one(question)
 
     # On récupère *tous* les candidats au-dessus du seuil : le bonus d'entités
     # doit pouvoir promouvoir un chunk situé hors du top_k sémantique.
-    if matrix is not None and matrix.shape[0] > 0 and metas is not None:
-        hits = score_rows(
-            query_embedding,
-            None,
-            None,
-            min_score=config.RETRIEVAL_MIN_SCORE,
-            matrix=matrix,
-            metas=metas,
-        )
-    else:
-        hits = score_rows(
-            query_embedding, rows, None, min_score=config.RETRIEVAL_MIN_SCORE
-        )
+    hits = score_rows(
+        query_embedding,
+        None,
+        None,
+        min_score=config.RETRIEVAL_MIN_SCORE,
+        matrix=matrix,
+        metas=metas,
+    )
 
-    # Hybrid bonus : si un chunk mentionne une entité présente dans la question,
-    # on ajoute un bonus basé sur les relations du graphe. Le bonus total est
-    # borné pour ne pas dépasser l'échelle du cosinus.
-    question_lower = question.lower()
-    for hit in hits:
-        bonus = 0.0
-        for ent_name in _extract_entity_names(hit.get("content", "")):
-            if ent_name.lower() in question_lower:
-                bonus += 0.1
-        if bonus > 0:
-            hit["score"] = round(min(1.0, hit["score"] + min(bonus, 0.3)), 4)
+    # Bonus hybride : une entité du graphe citée dans la question valorise le
+    # chunk qui la mentionne (donnée lue depuis `rag:mentions`, sans ré-extraction).
+    _apply_entity_bonus(hits, metas, question)
 
     # Re-trier après le bonus, puis tronquer au top_k demandé.
     hits.sort(key=lambda h: h["score"], reverse=True)
     hits = hits[:top_k]
 
-    candidates = matrix.shape[0] if matrix is not None else len(rows)
     log.info(
-        "Retrieval : %d candidats, %d retenus (seuil %.2f)",
+        "Retrieval : %d chunks indexés, %d après filtres, %d retenus (seuil %.2f)",
         candidates,
+        matrix.shape[0],
         len(hits),
         config.RETRIEVAL_MIN_SCORE,
     )

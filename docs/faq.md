@@ -18,10 +18,23 @@ Fluree est un graphe versionné (ledger) : chaque insertion est horodatée et l'
 
 Déposez des fichiers Markdown, texte ou PDF via l'interface web ou la CLI d'ingestion. Toute la connaissance répondue par le chatbot provient exclusivement de ces documents : le modèle refuse de répondre si l'information est absente du contexte récupéré.
 
+## Comment supprimer un document de la base ?
+
+Onglet **Documents** de l'interface : le bouton `×` de chaque source la désindexe. En ligne
+de commande : `curl -X DELETE 'http://localhost:8000/api/sources?source=docs/faq.md'`.
+
+Les chunks sont marqués obsolètes (ledger immuable) : ils ne sont plus utilisés pour
+répondre, mais l'historique reste consultable. Une nouvelle indexation du même fichier
+les réactive.
+
 ## Comment réinitialiser entièrement la base de connaissances ?
 
-1. `docker compose down -v` pour supprimer les volumes, puis `docker compose up -d` pour repartir de zéro.
-2. Ou changez de ledger en définissant la variable `FLUREE_LEDGER` du service backend (ex: `kb/main2`), puis redémarrez : `docker compose up -d backend`.
+1. Bouton **Réinitialiser** dans l'onglet Documents, ou
+   `curl -X POST http://localhost:8000/api/reset` : désindexe tous les documents en
+   conservant le ledger (et donc l'historique d'audit).
+2. `docker compose down -v` pour tout supprimer (volumes Fluree et modèles Ollama), puis
+   `docker compose up -d` pour repartir de zéro.
+3. Ou changez de ledger en définissant la variable `FLUREE_LEDGER` du service backend (ex: `kb/main2`), puis redémarrez : `docker compose up -d backend`.
 
 ⚠️ **Ne réutilisez pas le nom d'un ledger supprimé** : après un `drop`, le serveur garde un « tombeau » et toute transaction échoue avec `Ledger has been retracted`, même après redémarrage. Utilisez un nouveau nom de ledger (variable `FLUREE_LEDGER`).
 

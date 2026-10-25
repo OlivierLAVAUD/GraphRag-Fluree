@@ -16,15 +16,30 @@
 
 Deux méthodes :
 
-- **Interface web** : ouvrez http://localhost:8000, onglet « Documents », sélectionnez vos fichiers (.md, .markdown, .txt, .pdf) et cliquez sur « Indexer les fichiers ».
+- **Interface web** : ouvrez http://localhost:8000, onglet « Documents ». La zone de dépôt accepte plusieurs fichiers (.md, .markdown, .txt, .pdf) ; le bouton « Choisir un dossier » indexe d'un coup tous les documents d'un dossier, sous-dossiers compris. Le nom du document (ou du dossier) sélectionné s'affiche dans la zone de dépôt, et une barre de progression suit l'indexation fichier par fichier. Cliquez ensuite sur « Indexer ».
+
+  Un dossier uploadé conserve son chemin relatif comme source (`mon-dossier/sous/notes.md`) : deux fichiers de même nom dans des dossiers différents restent distincts. Seuls les formats supportés sont retenus, les autres fichiers du dossier sont ignorés (le nombre est signalé).
 - **CLI** : déposez vos fichiers dans `docs/` puis exécutez :
   - `docker compose exec backend python ingest.py docs/`
 
 L'indexation est idempotente : ré-ingérer le même fichier ne duplique pas la connaissance (les doublons sont éliminés à la recherche).
 
+## Désindexer un document ou réinitialiser la base
+
+Tout se fait dans l'onglet **Documents** de la modale « Base de connaissances » (carte en bas de la barre latérale, ou pastille « Documents » sous le champ de saisie, ou menu « ⋯ » → *Importer des documents*) :
+
+- **Un document** : bouton `×` à droite de chaque source de la liste « Sources indexées ».
+- **Tous les documents** : zone rouge « Réinitialiser la base », en bas de l'onglet.
+
+La désindexation est logique : les chunks sont marqués obsolètes, disparaissent des réponses, mais le ledger Fluree et son historique sont conservés (ré-indexer le fichier le réactive). Pour repartir d'un ledger réellement vide, arrêtez la pile et supprimez le volume : `docker compose down -v`.
+
+Si les boutons n'apparaissent pas après une mise à jour, videz le cache du navigateur (Ctrl+Maj+R) : le serveur envoie désormais `Cache-Control: no-cache` sur la page et les fichiers de l'interface.
+
 ## Interroger le chatbot
 
 Ouvrez http://localhost:8000, posez votre question dans le champ en bas. La réponse arrive en streaming, accompagnée des sources (fichier + numéro d'extrait + score de similarité).
+
+Les sources sont repliées par défaut sous la réponse : cliquez sur la barre « Sources » (nombre d'extraits et seuil de similarité) pour les déplier, puis sur un extrait pour lire le passage complet.
 
 Exemples de questions avec les documents d'exemple :
 - « Quels sont les services Docker de l'application ? »

@@ -78,7 +78,7 @@
       "id": 10,
       "category": "hallucination",
       "question": "Quel a été l'impact du déploiement de Mistral dans la fonction publique sur les effectifs du ministère de l'Intérieur ?",
-      "expected": "Information non disponible : le texte ne mentionne aucun impact sur les effectifs du ministère de l'Intérieur.",
+      "expected": "Je ne dispose pas de cette information dans ma base de connaissances.",
       "expected_absence": true,
       "mechanism": "Leurre : aucune donnée sur les effectifs ou réductions de postes dans le contexte. Le RAG doit refuser de répondre, pas inventer."
     }

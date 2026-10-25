@@ -85,7 +85,7 @@ Ouvrez ensuite **http://localhost:8000** :
 ### Interface web (http://localhost:8000)
 
 - **Chat** : questions en streaming, réponses citées avec les sources récupérées, historique local et export Markdown.
-- **Documents** : upload multiple (`.md`, `.txt`, `.pdf`) + rapports d'indexation.
+- **Documents** : upload multiple (`.md`, `.txt`, `.pdf`), rapports d'indexation, **désindexation d'une source** (bouton `×` sur chaque ligne) et **réinitialisation de la base** (zone rouge en bas de l'onglet). Les deux demandent une confirmation.
 - **GPU & modèles** : état du GPU vu par Ollama et modèles chargés.
 - **Suggestions** : les cartes de l'écran d'accueil sont configurables dans `backend/app/static/suggestions.json`.
 
@@ -95,8 +95,12 @@ Ouvrez ensuite **http://localhost:8000** :
 |---|---|---|
 | `POST` | `/api/chat` | `{"question": "..."}` → réponse en SSE (événements `token`, `sources` avec extrait, `done`) |
 | `POST` | `/api/search` | `{"question": "...", "top_k": 7, "source": "...", "entity": "..."}` → renvoie les chunks les plus pertinents (sans génération) ; `source` et `entity` sont des filtres optionnels |
-| `POST` | `/api/ingest` | Multipart `files` → indexe des documents dans Fluree |
+| `POST` | `/api/ingest` | Multipart `files` → indexe des documents dans Fluree ; un nom portant un chemin (`dossier/sous/a.md`) est conservé comme source |
+| `DELETE` | `/api/sources?source=…` | Désindexe une source (chunks marqués obsolètes, ledger conservé) |
+| `POST` | `/api/reset` | Réinitialise la base (tous les chunks désindexés, ledger et historique conservés) |
 | `GET`  | `/api/status` | Ledger, modèles, état des services |
+| `GET`  | `/api/sources` | Sources actives du graphe et nombre de chunks par source |
+| `GET`  | `/api/entities` | Entités mentionnées par les chunks actifs, avec type et fréquence |
 | `GET`  | `/api/gpu` | Utilisation GPU / VRAM vue par Ollama |
 | `GET`  | `/api/history` | Historique des transactions du ledger, tel qu'exposé par Fluree |
 
@@ -118,17 +122,32 @@ docker compose exec backend python eval_rag.py
 
 - Ingère tous les documents de `docs/` puis génère `eval_results.json`
   (à récupérer avec `docker compose cp backend:/app/eval_results.json .`).
-- Pour chaque question : **score 0-1** (scoring sémantique par cosinus sur embeddings, avec fallback lexical)
-  + les **extraits récupérés** (source, index, score de similarité, extrait) pour
-  distinguer un échec de recherche (*retrieval*) d'un échec de génération.
+- Pour chaque question : **score 0-1** (cosinus sur embeddings *calibré* : le
+  plancher de similarité du modèle — 0,6 par défaut — est retiré, sans quoi une
+  réponse hors sujet obtenait déjà ~0,6 par simple effet du modèle ; fallback
+  lexical si les embeddings échouent) + les **extraits récupérés** (source,
+  index, score de similarité, extrait) pour distinguer un échec de recherche
+  (*retrieval*) d'un échec de génération.
+- Une question est comptée comme réussie au-dessus de `--threshold` (0,55 par
+  défaut) ; `--floor` règle le plancher d'embeddings.
 - Les questions marquées `expected_absence` exigent une information **absente du
-  document** : le score vaut 1 si le modèle refuse honnêtement de répondre, 0 s'il
-  invente. C'est le test clé contre l'hallucination.
+  document** : le score vaut 1 seulement si le refus est **propre**, 0,5 si le
+  modèle refuse puis spécule (le cas dangereux), 0 s'il invente. C'est le test
+  clé contre l'hallucination.
+- Une question couverte par le corpus qui reçoit un refus vaut 0 : refuser n'est
+  pas une réussite par défaut.
 - Jeu de test sur mesure : `tests/eval/qa_france2030.json` (10 questions).
 
 ## Configuration (variables d'environnement)
 
-Dans `docker-compose.yml`, service `backend` :
+Toutes les variables du service `backend` sont pilotables sans éditer le compose :
+
+```bash
+cp .env.example .env      # puis ajustez les valeurs utiles
+```
+
+`.env` est ignoré par git ; `.env.example` documente chaque variable et sa valeur
+par défaut. Les principales :
 
 | Variable | Défaut | Rôle |
 |---|---|---|
@@ -139,12 +158,35 @@ Dans `docker-compose.yml`, service `backend` :
 | `CHUNK_SIZE` / `CHUNK_OVERLAP` | `500` / `80` | Découpage des documents |
 | `FLUREE_LEDGER` | `kb/main` | Nom du ledger (base) dans Fluree (ne pas réutiliser le nom d'un ledger supprimé : « Ledger has been retracted ») |
 | `INDEX_CACHE_DIR` | `/tmp/graphrag-index-cache` | Cache disque de l'index vectoriel (évite de rapatrier tous les embeddings à chaque redémarrage) |
-| `INDEX_CACHE_MAX_ENTRIES` | `32` | Nombre maximal d'index (source/entité) conservés |
-| `API_TOKEN` | *(vide)* | Si défini, exige `X-API-Token` ou `Authorization: Bearer` sur les endpoints d'écriture/chat |
+| `INDEX_CACHE_MAX_MB` | `256` | Budget mémoire du cache d'index ; au-delà, l'index n'est pas gardé en mémoire (`0` = cache mémoire désactivé). Évite que le processus backend grossisse sans limite sur un gros corpus |
+| `INDEX_CACHE_MAX_ENTRIES` | `32` | Nombre maximal de fichiers d'index conservés sur disque (un par version) |
+| `API_TOKEN` | *(vide)* | Si défini, exige `X-API-Token` ou `Authorization: Bearer` sur les endpoints de chat, recherche, ingestion, sources, entités et historique (comparaison à temps constant) |
 | `MAX_CONCURRENT_CHATS` | `2` | Générations simultanées autorisées (protection GPU) |
 | `MAX_UPLOAD_SIZE` / `MAX_TOTAL_UPLOAD_SIZE` | `50 Mo` / `200 Mo` | Limites par fichier / par requête |
 | `MAX_UPLOAD_FILES` | `20` | Nombre maximal de fichiers par requête |
 | `MAX_QUESTION_LENGTH` / `MAX_TOP_K` | `4000` / `50` | Bornes de validation de l'API |
+
+## Désindexer un document / réinitialiser la base
+
+Depuis l'interface (onglet **Documents**) ou par l'API :
+
+```bash
+curl -X DELETE 'http://localhost:8000/api/sources?source=docs/faq.md'
+curl -X POST   http://localhost:8000/api/reset
+```
+
+La désindexation est **logique**, pas physique : Fluree est un ledger immuable, donc
+les chunks sont marqués `rag:obsolete` (comme lors d'une ré-ingestion) au lieu d'être
+effacés. Conséquences :
+
+- les chunks disparaissent de la recherche et des réponses immédiatement (index de
+  recherche invalidé) ;
+- l'historique et la traçabilité restent intacts, et une nouvelle ingestion du même
+  fichier réactive ses chunks ;
+- `POST /api/reset` vide la base de la même façon. Il ne supprime pas le ledger :
+  c'est volontaire, car un `drop` laisse un « tombeau » qui interdit de réutiliser le
+  nom (`Ledger has been retracted`). Pour une remise à zéro complète (modèles + ledger),
+  utilisez `docker compose down -v`.
 
 ## Comment ça marche
 
@@ -157,11 +199,16 @@ Dans `docker-compose.yml`, service `backend` :
    conservent un `@id` stable dérivé de leur contenu. En CLI, la source est le chemin relatif
    au répertoire courant (deux fichiers homonymes dans des sous-dossiers restent distincts).
    Une insertion partielle est annulée (chunks déjà insérés marqués obsolètes).
-2. **Question** : l'embedding de la question est comparé par similarité cosinus aux chunks
-   du graphe (index local mis en cache pour éviter le recalcul) ; les `TOP_K` plus proches
-   sont retenus après application du seuil `RETRIEVAL_MIN_SCORE`. Le cache est invalidé
-   automatiquement après toute ingestion, y compris via la CLI (`ingest.py`), grâce à un
-   marqueur partagé entre processus.
+2. **Question** : un **index unique** du ledger (matrice d'embeddings L2-normalisée +
+   métadonnées) est construit une fois puis mis en cache mémoire (borné par
+   `INDEX_CACHE_MAX_MB`) et sur disque ; les filtres `source` et `entité` restreignent
+   cet index au lieu de réindexer le corpus. L'embedding de la question est comparé par
+   similarité cosinus aux chunks ; les `TOP_K` plus proches sont retenus après
+   application du seuil `RETRIEVAL_MIN_SCORE`. Un chunk dont une entité — lue dans les
+   `rag:mentions` du graphe — est citée dans la question reçoit un bonus borné, appliqué
+   **avant** la troncature au `TOP_K`. Le cache est invalidé automatiquement après toute
+   ingestion, y compris via la CLI (`ingest.py`), grâce à un marqueur partagé entre
+   processus.
 3. **Génération** : le prompt contient le contexte récupéré et ordonne au modèle de répondre
    uniquement à partir de celui-ci, en citant les sources `[1]…[k]`. La réponse est
    diffusée en streaming (SSE).

@@ -9,8 +9,6 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    services:
-      # Pas de services externes nécessaires pour les tests unitaires (mocks utilisés)
     steps:
       - name: Checkout du code
         uses: actions/checkout@v4
@@ -19,23 +17,18 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.13"
+          cache: pip
+          cache-dependency-path: backend/requirements*.txt
 
       - name: Installer les dépendances
         run: |
-          pip install -r backend/requirements.txt
           pip install -r backend/requirements-dev.txt
+          pip check
 
       - name: Exécuter les tests
         run: |
           cd backend
           PYTHONPATH=. pytest tests/ -v
-
-      - name: Upload des résultats de test
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: pytest-results
-          path: backend/tests/__pycache__/
 
   lint:
     runs-on: ubuntu-latest
@@ -47,10 +40,11 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.13"
+          cache: pip
+          cache-dependency-path: backend/requirements*.txt
 
-      - name: Installer les outils de linting
-        run: |
-          pip install flake8 black
+      - name: Installer les dépendances (dont black/flake8 épinglés)
+        run: pip install -r backend/requirements-dev.txt
 
       - name: Vérifier le formatage (black)
         run: |
@@ -61,3 +55,20 @@ jobs:
         run: |
           cd backend
           flake8 app/ tests/ ingest.py eval_rag.py
+
+  image:
+    # Vérifie que l'image de production se construit avec les versions épinglées
+    # (aucun test ne le faisait : une dépendance cassée ne se voyait qu'au
+    # premier `docker compose up`).
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout du code
+        uses: actions/checkout@v4
+
+      - name: Construire l'image backend
+        run: docker build -t graphrag-fluree-backend:ci ./backend
+
+      - name: Vérifier l'import de l'application dans l'image
+        run: |
+          docker run --rm graphrag-fluree-backend:ci \
+            python -c "import app.main, app.retriever, app.ingester; print('ok')"

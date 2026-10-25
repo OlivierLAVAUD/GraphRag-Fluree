@@ -1,13 +1,23 @@
 """Point d'entrée de l'application FastAPI : API + interface web."""
 
 import asyncio
+import hmac
 import json
 import logging
 import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile
+from fastapi import (
+    Depends,
+    FastAPI,
+    File,
+    Header,
+    HTTPException,
+    Query,
+    Request,
+    UploadFile,
+)
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -45,6 +55,22 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(title="GraphRag-Fluree", lifespan=lifespan)
 
 
+@app.middleware("http")
+async def revalidate_ui(request: Request, call_next):
+    """Force la revalidation des fichiers de l'interface.
+
+    Sans en-tête de cache, le navigateur peut réutiliser un `index.html` ou un
+    `app.js` d'une image Docker antérieure et afficher une UI périmée (boutons
+    absents). `no-cache` conserve la validation par ETag : réponse 304 si le
+    fichier n'a pas changé, contenu frais sinon.
+    """
+    response = await call_next(request)
+    path = request.url.path
+    if path == "/" or path.startswith("/static/"):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
+
+
 class ChatRequest(BaseModel):
     question: str = Field(max_length=config.MAX_QUESTION_LENGTH)
     source: str | None = Field(default=None, max_length=500)
@@ -69,21 +95,40 @@ def require_api_token(
     token = x_api_token
     if authorization and authorization.lower().startswith("bearer "):
         token = authorization[7:]
-    if token != config.API_TOKEN:
+    # Comparaison à temps constant : un `!=` laisse fuir la longueur du préfixe
+    # correct via le temps de réponse.
+    if not token or not hmac.compare_digest(token, config.API_TOKEN):
         raise HTTPException(status_code=401, detail="Jeton d'API manquant ou invalide.")
 
 
-# Un sémaphore par boucle asyncio (les tests instancient plusieurs boucles).
-_chat_semaphores: dict[object, asyncio.Semaphore] = {}
+# Créneaux de génération occupés, par boucle asyncio (les tests instancient
+# plusieurs boucles). Le compteur est incrémenté sans `await` : aucune course
+# possible entre le test de disponibilité et la réservation, contrairement à
+# `Semaphore.locked()` suivi d'un `acquire()` qui met la requête en attente.
+_chat_slots: dict[object, int] = {}
 
 
-def _chat_semaphore() -> asyncio.Semaphore:
+def _try_acquire_chat_slot() -> bool:
+    """Réserve un créneau de génération, ou renvoie False si le GPU est saturé."""
     loop = asyncio.get_running_loop()
-    semaphore = _chat_semaphores.get(loop)
-    if semaphore is None:
-        semaphore = asyncio.Semaphore(config.MAX_CONCURRENT_CHATS)
-        _chat_semaphores[loop] = semaphore
-    return semaphore
+    used = _chat_slots.get(loop, 0)
+    if used >= config.MAX_CONCURRENT_CHATS:
+        return False
+    _chat_slots[loop] = used + 1
+    return True
+
+
+def _release_chat_slot() -> None:
+    """Libère le créneau réservé pour la boucle courante."""
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:  # boucle déjà fermée (fin de test)
+        return
+    used = _chat_slots.get(loop, 0)
+    if used <= 1:
+        _chat_slots.pop(loop, None)
+    else:
+        _chat_slots[loop] = used - 1
 
 
 async def _read_limited(upload: UploadFile, limit: int) -> bytes:
@@ -126,6 +171,14 @@ async def status() -> dict:
         "min_score": config.RETRIEVAL_MIN_SCORE,
         "ollama_models": models,
         "fluree": config.FLUREE_URL,
+        # L'interface s'en sert pour valider une sélection (fichiers ou dossier)
+        # avant d'envoyer l'ingestion, au lieu de découvrir la limite en 413.
+        "limits": {
+            "max_upload_files": config.MAX_UPLOAD_FILES,
+            "max_upload_size": config.MAX_UPLOAD_SIZE,
+            "max_total_upload_size": config.MAX_TOTAL_UPLOAD_SIZE,
+            "supported_extensions": sorted(config.SUPPORTED_EXTENSIONS),
+        },
     }
 
 
@@ -184,25 +237,22 @@ async def list_entities() -> dict:
                 types[ent_id] = mention["@type"]
 
     if any(ent_id not in names for ent_id in counts):
-        payload = {
-            "@context": config.CTX,
-            "select": {"?e": ["*"]},
-            "where": {"@id": "?e", "ent:name": "?name"},
-        }
+        # Repli : noms des entités référencées par des chunks *actifs* (la
+        # requête part des chunks non obsolètes, contrairement à un `select`
+        # global qui ramenait aussi les entités de documents périmés).
         try:
-            entities = await asyncio.to_thread(
-                fluree._post, f"/query/{config.LEDGER}", payload, 60
-            )
+            active = await asyncio.to_thread(fluree.active_entity_names)
         except Exception as exc:  # noqa: BLE001
             log.warning("Noms d'entités indisponibles : %s", exc)
-            entities = []
-        for entity in entities if isinstance(entities, list) else []:
-            if not isinstance(entity, dict):
+            active = {}
+        for ent_id in list(counts):
+            if ent_id in names:
                 continue
-            ent_id = entity.get("@id")
-            if ent_id in counts:
-                names[ent_id] = entity.get("ent:name") or names.get(ent_id, ent_id)
-                types[ent_id] = entity.get("@type") or types.get(ent_id, "")
+            name = active.get(ent_id) or active.get(
+                f"ent:{fluree.entity_slug(str(ent_id).removeprefix('ent:'))}"
+            )
+            if name:
+                names[ent_id] = name
 
     result = []
     for ent_id, chunks in counts.items():
@@ -250,16 +300,48 @@ async def ingest(files: list[UploadFile] = File(...)) -> dict:
         data = await _read_limited(upload, min(config.MAX_UPLOAD_SIZE, remaining))
         total_bytes += len(data)
         text = ingester.read_bytes(data, filename)
-        chunks = await asyncio.to_thread(ingester.ingest_text, text, filename)
+        # Réconcilie le nom de fichier de l'upload avec la source utilisée par
+        # la CLI (`docs/faq.md`), pour ne pas indexer deux fois le même document.
+        # Un upload de dossier fournit un chemin relatif (voir resolve_upload_source).
+        source = await asyncio.to_thread(ingester.resolve_upload_source, filename)
+        chunks = await asyncio.to_thread(ingester.ingest_text, text, source)
         results.append(
             {
                 "file": filename,
+                "source": source,
                 "chars": len(text),
                 "chunks": len(chunks),
             }
         )
-    retriever.invalidate_index()
+    # `ingest_text` invalide déjà l'index de recherche après chaque insertion.
     return {"ingested": results}
+
+
+@app.delete("/api/sources", dependencies=[Depends(require_api_token)])
+async def deindex_source(
+    source: str = Query(min_length=1, max_length=500),
+) -> dict:
+    """Désindexe une source : ses chunks ne sont plus renvoyés par la recherche.
+
+    Le contenu n'est pas effacé du ledger (immuable) : les chunks sont marqués
+    obsolètes, comme lors d'une ré-ingestion. Une nouvelle ingestion du même
+    fichier réactive les chunks correspondants.
+    """
+    removed = await asyncio.to_thread(ingester.deindex_source, source)
+    if not removed:
+        raise HTTPException(status_code=404, detail=f"Source introuvable : {source}")
+    return {"source": source, "deindexed": removed, "ledger": config.LEDGER}
+
+
+@app.post("/api/reset", dependencies=[Depends(require_api_token)])
+async def reset_knowledge_base() -> dict:
+    """Réinitialise la base de connaissances (tous les chunks désindexés).
+
+    Le ledger Fluree n'est pas supprimé : l'historique d'audit reste consultable
+    et le nom du ledger reste utilisable (un `drop` laisse un « tombeau »).
+    """
+    removed = await asyncio.to_thread(ingester.reset_knowledge_base)
+    return {"deindexed": removed, "ledger": config.LEDGER}
 
 
 @app.post("/api/chat", dependencies=[Depends(require_api_token)])
@@ -269,13 +351,11 @@ async def chat(request: ChatRequest) -> StreamingResponse:
     if not question:
         raise HTTPException(status_code=400, detail="La question est vide.")
 
-    semaphore = _chat_semaphore()
-    if semaphore.locked():
+    if not _try_acquire_chat_slot():
         raise HTTPException(
             status_code=429,
             detail="Trop de générations simultanées, réessayez dans un instant.",
         )
-    await semaphore.acquire()
 
     async def sse():
         try:
@@ -334,7 +414,7 @@ async def chat(request: ChatRequest) -> StreamingResponse:
 
             yield _event({"type": "done", "sources": sources})
         finally:
-            semaphore.release()
+            _release_chat_slot()
 
     return StreamingResponse(sse(), media_type="text/event-stream")
 
