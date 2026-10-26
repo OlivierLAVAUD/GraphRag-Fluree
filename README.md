@@ -5,6 +5,10 @@ de connaissances et **Ollama** pour l'inférence locale sur **GPU NVIDIA**. Tout
 local : les réponses sont fiables, citées et traçables — la connaissance provient
 exclusivement de vos documents.
 
+<p align="center">
+  <img src="assets/image_0.png" alt="Interface de chat GraphRag-Fluree : suggestions, filtres source/entité et top_k" width="100%">
+</p>
+
 ```
 ┌────────────┐   HTTP/SSE   ┌──────────────┐       ┌─────────────┐
 │ Interface  │ ───────────► │   backend    │ ◄────►│   Ollama    │  (GPU NVIDIA)
@@ -18,12 +22,21 @@ exclusivement de vos documents.
                             └─────────────┘
 ```
 
+## Démonstration
+
+Indexation d'un dossier, question en streaming et réponse citant ses sources :
+
+![Démonstration de GraphRag-Fluree : ingestion d'un dossier puis question au chatbot](assets/GraphRag_with_fluree_0.gif)
+
 ## Fonctionnalités
 
 - **Ingestion** de documents Markdown, texte brut et **PDF** (découpage en chunks avec
   recouvrement, embeddings, stockage en JSON-LD dans le graphe Fluree).
 - **Chat en streaming** avec citations : chaque affirmation renvoie vers sa source
-  (fichier, extrait, score de similarité).
+  (fichier, extrait, score de similarité), sources repliées sous la réponse et dépliables
+  d'un clic.
+- **Ingestion d'un dossier entier** depuis l'interface, avec barre de progression
+  fichier par fichier et bilan des échecs sans interrompre les fichiers suivants.
 - **Graphe de connaissances complet** : Fluree est un ledger immuable et versionné ;
   l'historique de chaque donnée qui alimente les réponses est consultable.
 - **100 % local** : aucun appel à un service IA tiers.
@@ -85,9 +98,15 @@ Ouvrez ensuite **http://localhost:8000** :
 ### Interface web (http://localhost:8000)
 
 - **Chat** : questions en streaming, réponses citées avec les sources récupérées, historique local et export Markdown.
-- **Documents** : upload multiple (`.md`, `.txt`, `.pdf`), rapports d'indexation, **désindexation d'une source** (bouton `×` sur chaque ligne) et **réinitialisation de la base** (zone rouge en bas de l'onglet). Les deux demandent une confirmation.
+- **Documents** : sélection de plusieurs fichiers ou d'un **dossier entier** (`.md`, `.markdown`, `.txt`, `.pdf`, sous-dossiers compris), barre de progression de l'indexation, rapports par fichier, **désindexation d'une source** (bouton `×` sur chaque ligne) et **réinitialisation de la base** (zone rouge en bas de l'onglet). Les deux demandent une confirmation.
 - **GPU & modèles** : état du GPU vu par Ollama et modèles chargés.
 - **Suggestions** : les cartes de l'écran d'accueil sont configurables dans `backend/app/static/suggestions.json`.
+
+<p align="center">
+  <img src="assets/image_1.png" alt="Onglet Documents : sélection de fichiers, sources indexées et réinitialisation de la base" width="680">
+  <br>
+  <em>Onglet « Documents » : dépôt de fichiers ou d'un dossier, sources indexées et réinitialisation de la base.</em>
+</p>
 
 ### API
 
@@ -244,4 +263,4 @@ ont été supprimés ; relancez et ré-indexez.
   `FLUREE_DATA_AUTH_MODE=required` et `FLUREE_ADMIN_AUTH_MODE=required` si le service est
   exposé au-delà de la machine locale.
 - Aucune donnée n'est envoyée à l'extérieur ; le déploiement est pensé pour un usage
-  local / réseau privé.# GraphRag-Fluree
+  local / réseau privé.
